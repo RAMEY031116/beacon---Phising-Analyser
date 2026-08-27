@@ -164,6 +164,23 @@ hr {
     border-color: var(--yeti-border);
 }
 </style>
+<style>
+div[data-testid="stFormSubmitButton"] {
+    height: 0;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+div[data-testid="stFormSubmitButton"] button {
+    visibility: hidden;
+    height: 0;
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    border: 0;
+}
+</style>
+
 """,
     unsafe_allow_html=True,
 )
@@ -901,12 +918,7 @@ with st.container(border=True):
 
     left, right = st.columns([1, 2])
     with left:
-        scan_mode = st.radio(
-            "Scan mode",
-            ["Quick Check", "Deep Check"],
-            horizontal=True,
-            help="Deep Check opens the final page in a headless browser, takes a screenshot, and inspects forms/credential fields.",
-        )
+        scan_mode = "Deep Check"
     with right:
         st.caption(
             "Quick Check: URL + DNS + redirects + domain + RDAP + TLS + brand checks.  "
