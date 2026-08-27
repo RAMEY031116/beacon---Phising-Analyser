@@ -875,7 +875,8 @@ def analyse_url(url):
 with st.form("website_check", clear_on_submit=False):
     website = st.text_input(
         "Website",
-        placeholder="https://example.com"
+        placeholder="https://example.com",
+        key="website_input"
     )
 
     submitted = st.form_submit_button("Check website")
@@ -1107,3 +1108,10 @@ if submitted:
                 "Unknown"
             )
         )
+
+    st.divider()
+
+    if st.button("Reset", key="reset_button"):
+        st.session_state["website_input"] = ""
+        st.rerun()
+
