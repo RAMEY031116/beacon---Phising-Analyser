@@ -8,27 +8,57 @@ from playwright.sync_api import sync_playwright
 
 st.set_page_config(
     page_title="Yeti Check",
-    page_icon="🏔️",
     layout="wide"
 )
 
-st.title("🏔️ Yeti Check")
-st.subheader("Check before you click")
+st.markdown("""
+<style>
 
-url = st.text_input("Enter URL")
+.main-title {
+    text-align: center;
+    font-size: 3rem;
+    font-weight: 700;
+    margin-bottom: 0px;
+}
+
+.sub-title {
+    text-align: center;
+    color: #888;
+    margin-bottom: 30px;
+}
+
+.block-container {
+    padding-top: 2rem;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown(
+    """
+<div class="main-title">Yeti Check</div>
+<div class="sub-title">
+Investigate links safely before opening them
+</div>
+""",
+    unsafe_allow_html=True
+)
+
+url = st.text_input(
+    "Enter URL",
+    placeholder="https://example.com"
+)
 
 if st.button("Analyse"):
 
     if not url:
-        st.warning("Please enter a URL")
+        st.warning("Please enter a URL.")
         st.stop()
 
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
     try:
-
-        st.header("🔍 Redirect Analysis")
 
         response = requests.get(
             url,
@@ -40,25 +70,121 @@ if st.button("Analyse"):
         )
 
         redirects = [r.url for r in response.history]
+
         final_url = response.url
 
-        st.write("### Original URL")
-        st.code(url)
+        parsed = urlparse(final_url)
 
-        st.write("### Redirect Chain")
+        domain = parsed.netloc
 
-        if redirects:
-            for item in redirects:
-                st.write("➡️", item)
+        age = None
+        registrar = "Unknown"
+
+        try:
+
+            info = whois.whois(domain)
+
+            registrar = getattr(
+                info,
+                "registrar",
+                "Unknown"
+            )
+
+            created = info.creation_date
+
+            if isinstance(created, list):
+                created = created[0]
+
+            if created:
+                age = (
+                    datetime.now() - created
+                ).days
+
+        except:
+            pass
+
+        score = 0
+        reasons = []
+
+        if len(redirects) >= 2:
+            score += 25
+            reasons.append(
+                "Multiple redirects detected"
+            )
+
+        if age and age < 30:
+            score += 50
+            reasons.append(
+                "Recently registered domain"
+            )
+
+        if "-" in domain:
+            score += 10
+            reasons.append(
+                "Hyphenated domain detected"
+            )
+
+        if "login" in final_url.lower():
+            score += 10
+            reasons.append(
+                "Login related URL detected"
+            )
+
+        if score >= 60:
+            verdict = "Potentially Suspicious"
+
+        elif score >= 30:
+            verdict = "Proceed With Caution"
+
         else:
-            st.write("No redirects detected.")
+            verdict = "Trusted"
 
-        st.write("### Final URL")
-        st.success(final_url)
+        secure_connection = (
+            "Yes"
+            if final_url.startswith("https://")
+            else "No"
+        )
 
-        st.header("📸 Website Screenshot")
+        st.divider()
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric(
+                "Risk Score",
+                f"{score}/100"
+            )
+
+        with col2:
+            st.metric(
+                "Redirects",
+                len(redirects)
+            )
+
+        with col3:
+            st.metric(
+                "HTTPS",
+                secure_connection
+            )
+
+        with col4:
+            if age:
+                st.metric(
+                    "Domain Age",
+                    f"{age} Days"
+                )
+            else:
+                st.metric(
+                    "Domain Age",
+                    "Unknown"
+                )
+
+        st.divider()
+
+        st.subheader("Website Screenshot")
 
         screenshot_file = "screenshot.png"
+        page_title = "Unknown"
 
         chromium_paths = [
             "/usr/bin/chromium",
@@ -72,8 +198,6 @@ if st.button("Analyse"):
             if os.path.exists(path):
                 chromium_path = path
                 break
-
-        st.write("Chromium found:", chromium_path)
 
         if chromium_path:
 
@@ -103,6 +227,8 @@ if st.button("Analyse"):
                     timeout=30000
                 )
 
+                page_title = page.title()
+
                 page.screenshot(
                     path=screenshot_file,
                     full_page=True
@@ -112,127 +238,140 @@ if st.button("Analyse"):
 
             st.image(
                 screenshot_file,
-                caption="Website Screenshot"
+                use_container_width=True
             )
 
         else:
             st.error(
-                "Chromium browser not found on Streamlit server."
+                "Chromium not found on server."
             )
 
-        # DOMAIN INFO
+        st.subheader("Key Findings")
 
-        st.header("🌐 Domain Information")
+        findings = []
 
-        domain = urlparse(final_url).netloc
-
-        st.write("**Domain:**", domain)
-
-        age = None
-
-        try:
-
-            domain_info = whois.whois(domain)
-
-            registrar = getattr(
-                domain_info,
-                "registrar",
-                "Unknown"
-            )
-
-            st.write("**Registrar:**", registrar)
-
-            created = domain_info.creation_date
-
-            if isinstance(created, list):
-                created = created[0]
-
-            if created:
-
-                age = (
-                    datetime.now() - created
-                ).days
-
-                st.write(
-                    "**Created:**",
-                    created.date()
-                )
-
-                st.write(
-                    "**Age:**",
-                    f"{age} days"
-                )
-
-        except Exception:
-            st.warning(
-                "Could not retrieve WHOIS information."
-            )
-
-        # RISK SCORE
-
-        st.header("⚠️ Risk Assessment")
-
-        score = 0
-        reasons = []
-
-        if len(redirects) >= 2:
-            score += 25
-            reasons.append(
-                "Multiple redirects detected"
-            )
-
-        if age and age < 30:
-            score += 50
-            reasons.append(
-                "Domain less than 30 days old"
-            )
-
-        if "-" in domain:
-            score += 10
-            reasons.append(
-                "Hyphenated domain detected"
-            )
-
-        if score >= 60:
-            verdict = "🔴 High Risk"
-        elif score >= 30:
-            verdict = "🟡 Medium Risk"
-        else:
-            verdict = "🟢 Low Risk"
-
-        st.metric(
-            "Risk Score",
-            f"{score}/100"
+        findings.append(
+            f"Final destination is {domain}"
         )
 
-        st.write(verdict)
+        findings.append(
+            f"{len(redirects)} redirect(s) detected"
+        )
 
-        if reasons:
-            st.write("### Reasons")
+        findings.append(
+            f"Connection secured with HTTPS: {secure_connection}"
+        )
 
-            for reason in reasons:
-                st.write("•", reason)
+        if age:
+            findings.append(
+                f"Domain registered approximately {age} days ago"
+            )
 
-        # SUMMARY
+        for item in findings:
+            st.write("•", item)
 
-        st.header("🤖 Yeti Summary")
+        st.subheader("Page Information")
 
-        summary = f"""
-The URL redirected {len(redirects)} time(s)
-before reaching:
+        st.write(
+            "**Title:**",
+            page_title
+        )
+
+        favicon = (
+            f"https://www.google.com/s2/favicons"
+            f"?domain={domain}&sz=128"
+        )
+
+        st.image(
+            favicon,
+            width=40
+        )
+
+        st.subheader("Analysis Summary")
+
+        st.info(
+            f"""
+Final destination:
 
 {final_url}
 
-Overall Risk Assessment:
+Assessment:
+
 {verdict}
 
-This assessment is based on redirect
-behaviour, domain information and
-basic phishing indicators.
+This assessment is based on the redirect chain, domain age, URL structure and other basic indicators. Results should be used as guidance only.
 """
+        )
 
-        st.info(summary)
+        with st.expander(
+            "View Redirect Chain"
+        ):
+
+            if redirects:
+
+                for item in redirects:
+                    st.write(item)
+
+            else:
+                st.write(
+                    "No redirects detected."
+                )
+
+        with st.expander(
+            "View Domain Information"
+        ):
+
+            st.write(
+                "Domain:",
+                domain
+            )
+
+            st.write(
+                "Registrar:",
+                registrar
+            )
+
+            st.write(
+                "HTTPS:",
+                secure_connection
+            )
+
+            st.write(
+                "Host:",
+                parsed.netloc
+            )
+
+            st.write(
+                "Path:",
+                parsed.path if parsed.path else "/"
+            )
+
+            if age:
+                st.write(
+                    "Age:",
+                    f"{age} days"
+                )
+
+        with st.expander(
+            "View Risk Details"
+        ):
+
+            if reasons:
+
+                for reason in reasons:
+                    st.write(
+                        "•",
+                        reason
+                    )
+
+            else:
+
+                st.write(
+                    "No significant risk indicators detected."
+                )
 
     except Exception as e:
 
-        st.error(str(e))
+        st.error(
+            f"Analysis failed: {e}"
+        )
