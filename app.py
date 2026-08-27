@@ -110,6 +110,36 @@ st.markdown(
         color: inherit;
     }
 
+
+    .stButton > button,
+    div[data-testid="stFormSubmitButton"] > button {
+        background-color: #1f2933 !important;
+        color: #ffffff !important;
+        border: 1px solid #1f2933 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    .stButton > button:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover {
+        background-color: #2f3b49 !important;
+        color: #ffffff !important;
+        border-color: #2f3b49 !important;
+    }
+
+    .stButton > button:focus,
+    div[data-testid="stFormSubmitButton"] > button:focus {
+        background-color: #1f2933 !important;
+        color: #ffffff !important;
+        border-color: #1f2933 !important;
+        box-shadow: none !important;
+    }
+
+    .stButton > button p,
+    div[data-testid="stFormSubmitButton"] > button p {
+        color: #ffffff !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
