@@ -3,26 +3,29 @@ import requests
 import whois
 import os
 import socket
-import ipaddress
 from urllib.parse import urlparse
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-# ---------------- PAGE CONFIG ---------------- #
+# ----------------------------------
+# CONFIG
+# ----------------------------------
 
 st.set_page_config(
     page_title="Yeti Check",
     layout="wide"
 )
 
-# ---------------- STYLING ---------------- #
+# ----------------------------------
+# STYLE
+# ----------------------------------
 
 st.markdown("""
 <style>
 
 .main-title{
     text-align:center;
-    font-size:52px;
+    font-size:3.5rem;
     font-weight:700;
     margin-bottom:0;
 }
@@ -30,84 +33,80 @@ st.markdown("""
 .sub-title{
     text-align:center;
     color:#888;
-    font-size:18px;
-    margin-bottom:30px;
-}
-
-.stat-box{
-    background:#f5f5f5;
-    padding:15px;
-    border-radius:10px;
+    margin-bottom:2rem;
 }
 
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- HERO ---------------- #
+# ----------------------------------
+# HEADER
+# ----------------------------------
 
 st.markdown("""
-<div class="main-title">
-Yeti Check
-</div>
-
+<div class="main-title">Yeti Check</div>
 <div class="sub-title">
-Investigate links before you interact with them
+Investigate links before interacting with them
 </div>
 """, unsafe_allow_html=True)
 
 url = st.text_input(
-    "Enter URL",
+    "URL",
     placeholder="https://example.com"
 )
 
-analyse = st.button("Analyse")
+# ----------------------------------
+# ANALYSE BUTTON
+# ----------------------------------
 
-# ---------------- ANALYSIS ---------------- #
-
-if analyse:
-
-    if not url:
-        st.warning("Please enter a URL.")
-        st.stop()
-
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+if st.button("Analyse"):
 
     try:
+
+        if not url:
+            st.warning("Please enter a URL.")
+            st.stop()
+
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+
+        # ----------------------------------
+        # REQUEST
+        # ----------------------------------
 
         response = requests.get(
             url,
             allow_redirects=True,
             timeout=15,
-            headers={
-                "User-Agent": "Mozilla/5.0"
-            }
+            headers={"User-Agent": "Mozilla/5.0"}
         )
 
         redirects = [r.url for r in response.history]
 
         final_url = response.url
 
-        parsed = urlparse(final_url)
+        parsed_url = urlparse(final_url)
 
-        domain = parsed.netloc
+        domain = parsed_url.netloc
 
-        # ---------------- WHOIS ---------------- #
+        # ----------------------------------
+        # WHOIS
+        # ----------------------------------
 
         age = None
         registrar = "Unknown"
 
         try:
 
-            info = whois.whois(domain)
+            domain_info = whois.whois(domain)
 
             registrar = getattr(
-                info,
+                domain_info,
                 "registrar",
                 "Unknown"
             )
 
-            created = info.creation_date
+            created = domain_info.creation_date
 
             if isinstance(created, list):
                 created = created[0]
@@ -120,14 +119,18 @@ if analyse:
         except:
             pass
 
-        # ---------------- IP ---------------- #
+        # ----------------------------------
+        # IP LOOKUP
+        # ----------------------------------
 
         try:
             ip_address = socket.gethostbyname(domain)
         except:
             ip_address = "Unknown"
 
-        # ---------------- SCREENSHOT ---------------- #
+        # ----------------------------------
+        # SCREENSHOT
+        # ----------------------------------
 
         page_title = "Unknown"
 
@@ -160,7 +163,12 @@ if analyse:
                     ]
                 )
 
-                page = browser.new_page()
+                page = browser.new_page(
+                    viewport={
+                        "width": 1366,
+                        "height": 768
+                    }
+                )
 
                 page.goto(
                     final_url,
@@ -168,7 +176,10 @@ if analyse:
                     timeout=30000
                 )
 
-                page_title = page.title()
+                try:
+                    page_title = page.title()
+                except:
+                    page_title = "Unknown"
 
                 page.screenshot(
                     path=screenshot_file,
@@ -177,113 +188,54 @@ if analyse:
 
                 browser.close()
 
-        # ---------------- RISK ANALYSIS ---------------- #
+        # ----------------------------------
+        # RISK ENGINE
+        # ----------------------------------
 
         score = 0
         reasons = []
 
-        suspicious_words = [
+        suspicious_keywords = [
             "login",
             "signin",
             "password",
             "verify",
             "account",
+            "security",
             "authentication",
-            "secure",
-            "payment",
             "invoice",
+            "payment",
             "update"
         ]
 
-        detected_keywords = []
+        found_keywords = []
 
-        text_to_check = (
-            final_url.lower()
-            + " "
-            + page_title.lower()
+        test_string = (
+            final_url.lower() +
+            " " +
+            page_title.lower()
         )
 
-        for word in suspicious_words:
+        for keyword in suspicious_keywords:
 
-            if word in text_to_check:
-                detected_keywords.append(word)
-
-        brands = [
-            "microsoft",
-            "google",
-            "paypal",
-            "amazon",
-            "adobe",
-            "dhl",
-            "dropbox",
-            "onedrive",
-            "office365"
-        ]
-
-        detected_brands = []
-
-        for brand in brands:
-            if brand.lower() in text_to_check:
-                detected_brands.append(brand)
+            if keyword in test_string:
+                found_keywords.append(keyword)
 
         if len(redirects) >= 2:
             score += 20
-            reasons.append(
-                "+20 Multiple redirects detected"
-            )
+            reasons.append("Multiple redirects detected")
 
         if age and age < 30:
             score += 40
-            reasons.append(
-                "+40 Recently registered domain"
-            )
+            reasons.append("Recently registered domain")
 
         if "-" in domain:
             score += 10
-            reasons.append(
-                "+10 Hyphenated domain"
-            )
+            reasons.append("Hyphenated domain")
 
-        if detected_keywords:
+        if found_keywords:
             score += 15
-            reasons.append(
-                "+15 Authentication related keywords"
-            )
-
-        try:
-
-            ipaddress.ip_address(domain)
-
-            score += 15
-
-            reasons.append(
-                "+15 Direct IP address used"
-            )
-
-        except:
-            pass
-
-        suspicious_tlds = [
-            ".xyz",
-            ".top",
-            ".click",
-            ".gq",
-            ".tk",
-            ".ml",
-            ".cf"
-        ]
-
-        for tld in suspicious_tlds:
-
-            if domain.endswith(tld):
-
-                score += 10
-
-                reasons.append(
-                    "+10 Commonly abused TLD"
-                )
-
-                break
+            reasons.append("Suspicious keywords present")
 
         if score >= 60:
             verdict = "Potentially Suspicious"
@@ -294,7 +246,9 @@ if analyse:
         else:
             verdict = "Trusted"
 
-        # ---------------- TOP METRICS ---------------- #
+        # ----------------------------------
+        # METRICS
+        # ----------------------------------
 
         st.divider()
 
@@ -324,9 +278,9 @@ if analyse:
                 f"{age} Days" if age else "Unknown"
             )
 
-        # ---------------- SCREENSHOT ---------------- #
-
-        st.divider()
+        # ----------------------------------
+        # SCREENSHOT DISPLAY
+        # ----------------------------------
 
         st.subheader("Website Screenshot")
 
@@ -336,60 +290,42 @@ if analyse:
                 use_container_width=True
             )
 
-        # ---------------- KEY FINDINGS ---------------- #
+        # ----------------------------------
+        # KEY FINDINGS
+        # ----------------------------------
 
         st.subheader("Key Findings")
 
-        st.write(f"• Final destination: {domain}")
-        st.write(f"• Redirect count: {len(redirects)}")
-        st.write(f"• Registrar: {registrar}")
-        st.write(f"• Resolved IP: {ip_address}")
+        st.write(f"Final Destination: {final_url}")
+        st.write(f"Domain: {domain}")
+        st.write(f"IP Address: {ip_address}")
+        st.write(f"Registrar: {registrar}")
 
-        # ---------------- PAGE INFO ---------------- #
+        # ----------------------------------
+        # PAGE INFORMATION
+        # ----------------------------------
 
         st.subheader("Page Information")
 
-        st.write("**Page Title:**", page_title)
+        st.write("Title:", page_title)
 
-        favicon = (
-            f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
-        )
-
-        st.image(
-            favicon,
-            width=40
-        )
-
-        # ---------------- SUSPICIOUS INDICATORS ---------------- #
-
-        st.subheader("Indicators")
-
-        if detected_keywords:
+        if found_keywords:
 
             st.warning(
-                "Keywords detected: "
-                + ", ".join(detected_keywords)
+                "Keywords found: "
+                + ", ".join(found_keywords)
             )
 
-        else:
-
-            st.success(
-                "No suspicious keywords detected."
-            )
-
-        if detected_brands:
-
-            st.info(
-                "Possible brand references: "
-                + ", ".join(detected_brands)
-            )
-
-        # ---------------- ANALYST VERDICT ---------------- #
+        # ----------------------------------
+        # VERDICT
+        # ----------------------------------
 
         st.subheader("Analyst Verdict")
 
         verdict_text = f"""
-The supplied URL eventually resolves to:
+Assessment: {verdict}
+
+This site ultimately resolves to:
 
 {final_url}
 
@@ -397,39 +333,101 @@ The page title identified was:
 
 {page_title}
 
-Risk Assessment:
+The risk score is based on
+redirect activity,
+domain age,
+keyword analysis,
+and URL characteristics.
 
-{verdict}
-
-This assessment is based on redirect behaviour,
-domain characteristics, keyword analysis,
-domain registration age and URL structure.
-
-Recommendation:
-
-Avoid entering credentials or personal
-information unless the destination
-has been independently verified.
+Avoid entering passwords or personal
+information unless the site has
+been independently verified.
 """
 
         st.info(verdict_text)
 
-        # ---------------- TECHNICAL ---------------- #
+        # ----------------------------------
+        # EXPANDERS
+        # ----------------------------------
 
         with st.expander("Redirect Chain"):
 
             if redirects:
 
-                for r in redirects:
-                    st.write(r)
+                for item in redirects:
+                    st.write(item)
 
             else:
                 st.write(
                     "No redirects detected."
                 )
 
-        with st.expander("Domain Details"):
+        with st.expander("Domain Information"):
 
             st.write("Domain:", domain)
             st.write("Registrar:", registrar)
-    
+            st.write("IP Address:", ip_address)
+
+            if age:
+                st.write("Age:", age, "days")
+
+        with st.expander("Risk Breakdown"):
+
+            if reasons:
+
+                for item in reasons:
+                    st.write("•", item)
+
+            else:
+
+                st.write(
+                    "No significant indicators detected."
+                )
+
+        # ----------------------------------
+        # DOWNLOAD REPORT
+        # ----------------------------------
+
+        report = f"""
+YETI CHECK REPORT
+
+URL:
+{url}
+
+FINAL URL:
+{final_url}
+
+VERDICT:
+{verdict}
+
+RISK SCORE:
+{score}/100
+
+TITLE:
+{page_title}
+
+DOMAIN:
+{domain}
+
+REGISTRAR:
+{registrar}
+
+IP:
+{ip_address}
+
+KEYWORDS:
+{', '.join(found_keywords)}
+"""
+
+        st.download_button(
+            label="Download Report",
+            data=report,
+            file_name="yeticheck_report.txt",
+            mime="text/plain"
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Analysis failed: {e}"
+        )
