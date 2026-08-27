@@ -21,7 +21,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 st.set_page_config(
     page_title="Yeti Check",
-    page_icon="🛡️",
+    page_icon="",
     layout="wide",
 )
 
@@ -110,31 +110,65 @@ BRANDS = {
 st.markdown(
     """
 <style>
+:root {
+    --yeti-bg: #f6f8fb;
+    --yeti-card: #ffffff;
+    --yeti-border: #d9e0e8;
+    --yeti-text: #17202a;
+    --yeti-muted: #667085;
+    --yeti-accent: #1f4e79;
+}
+.stApp {
+    background: var(--yeti-bg);
+    color: var(--yeti-text);
+}
+.block-container {
+    max-width: 1180px;
+    padding-top: 2.25rem;
+    padding-bottom: 3rem;
+}
 .main-title {
-    text-align:center;
-    font-size:3.4rem;
-    font-weight:800;
-    margin-bottom:0;
+    text-align: center;
+    font-size: 3rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--yeti-text);
+    margin-bottom: 0.25rem;
 }
 .sub-title {
-    text-align:center;
-    color:#888;
-    margin-bottom:1.2rem;
+    text-align: center;
+    color: var(--yeti-muted);
+    margin-bottom: 2rem;
+    font-size: 1rem;
 }
-.verdict-card {
-    border:1px solid rgba(128,128,128,.25);
-    border-radius:16px;
-    padding:1.1rem 1.2rem;
-    margin:0.6rem 0 1.2rem 0;
+div[data-testid="stMetric"] {
+    background: var(--yeti-card);
+    border: 1px solid var(--yeti-border);
+    border-radius: 10px;
+    padding: 0.85rem;
 }
-.small-note { color:#888; font-size:.92rem; }
-code { word-break: break-all; }
+div[data-testid="stExpander"] {
+    border: 1px solid var(--yeti-border);
+    border-radius: 10px;
+    background: var(--yeti-card);
+}
+.stButton > button {
+    border-radius: 8px;
+    font-weight: 600;
+    border: 1px solid var(--yeti-accent);
+}
+.stTextInput input {
+    border-radius: 8px;
+}
+hr {
+    border-color: var(--yeti-border);
+}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="main-title">🛡️ Yeti Check</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title"> Yeti Check</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-title">Investigate suspicious links before interacting with them</div>',
     unsafe_allow_html=True,
@@ -825,19 +859,19 @@ def calculate_risk(
 
     if score >= 75:
         verdict = "High phishing risk"
-        icon = "🔴"
+        icon = ""
         action = "Do not sign in, pay, or enter personal information through this link. Use the organisation's official app or type its known website address yourself."
     elif score >= 45:
         verdict = "Suspicious — verify independently"
-        icon = "🟠"
+        icon = ""
         action = "Do not enter credentials yet. Verify the organisation and domain through an independent source before proceeding."
     elif score >= 20:
         verdict = "Some caution indicators"
-        icon = "🟡"
+        icon = ""
         action = "No decisive phishing evidence was found, but some indicators deserve checking. Verify the domain before entering sensitive information."
     else:
         verdict = "No major phishing indicators detected"
-        icon = "🟢"
+        icon = ""
         action = "No major indicators were detected by these checks. This is not a guarantee that the site is genuine; verify sensitive requests independently."
 
     return {
@@ -981,14 +1015,14 @@ if analyse_clicked:
         c5.metric("Domain age", f"{rdap['age_days']} days" if rdap.get("age_days") is not None else "Unknown")
 
         # Identity check
-        st.subheader("🏢 Identity check")
+        st.subheader(" Identity check")
         primary = brand.get("primary")
         if primary:
             a, b, c = st.columns(3)
             a.write(f"**Possible brand:** {primary['brand'].title()}")
             b.write(f"**Actual registered domain:** `{reg_domain}`")
             b_ok = primary["official"]
-            c.write(f"**Official domain match:** {'✅ Yes' if b_ok else '❌ No'}")
+            c.write(f"**Official domain match:** {' Yes' if b_ok else ' No'}")
 
             if not b_ok:
                 st.error(
@@ -1004,13 +1038,13 @@ if analyse_clicked:
         st.subheader("🔍 Why Yeti reached this result")
         if risk["risks"]:
             for item in risk["risks"]:
-                icon = "🔴" if item["severity"] == "high" else "🟠" if item["severity"] == "medium" else "🟡"
+                icon = "" if item["severity"] == "high" else "" if item["severity"] == "medium" else ""
                 st.markdown(f"{icon} **{item['title']}**  \n{item['detail']}  \n`+{item['points']} risk points`")
         else:
             st.success("No significant phishing indicators were detected by the checks that completed.")
 
         if risk["positives"]:
-            with st.expander("✅ Reassuring signals"):
+            with st.expander(" Reassuring signals"):
                 for item in risk["positives"]:
                     st.write("•", item)
 
@@ -1027,20 +1061,20 @@ if analyse_clicked:
                 st.warning("Deep Check note: " + page["error"])
 
             if page.get("screenshot") and os.path.exists(page["screenshot"]):
-                st.subheader("📸 Website screenshot")
+                st.subheader(" Website screenshot")
                 st.image(page["screenshot"], use_container_width=True)
 
             with st.expander("Page and form details"):
                 st.write("**Page title:**", page.get("title") or "Unknown")
                 if page["forms"]:
                     for idx, form in enumerate(page["forms"], start=1):
-                        marker = "⚠️ External domain" if form["external"] else "Same registered domain"
+                        marker = " External domain" if form["external"] else "Same registered domain"
                         st.write(f"**Form {idx}:** {form['method']} → `{form['action']}` — {marker}")
                 else:
                     st.write("No HTML forms detected.")
 
         # Technical details
-        with st.expander("🌐 Redirect chain"):
+        with st.expander(" Redirect chain"):
             for idx, hop in enumerate(fetch["redirect_chain"], start=1):
                 st.write(
                     f"**{idx}. HTTP {hop['status']}** — `{hop['url']}`  \n"
@@ -1058,7 +1092,7 @@ if analyse_clicked:
             if rdap.get("error"):
                 st.caption("RDAP note: " + rdap["error"])
 
-        with st.expander("🔐 TLS certificate"):
+        with st.expander(" TLS certificate"):
             st.write("**TLS enabled:**", "Yes" if tls.get("enabled") else "No")
             st.write("**Certificate validated:**", "Yes" if tls.get("valid") else "No")
             st.write("**Issuer:**", tls.get("issuer") or "Unknown")
