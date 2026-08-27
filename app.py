@@ -140,6 +140,99 @@ st.markdown(
         color: #ffffff !important;
     }
 
+
+    /* Keep Streamlit metric cards readable in every theme */
+    div[data-testid="stMetric"] {
+        background-color: #ffffff !important;
+        color: #1f2933 !important;
+        border: 1px solid #d8dee6 !important;
+        border-radius: 8px !important;
+        padding: 0.7rem !important;
+    }
+
+    div[data-testid="stMetric"] * {
+        color: #1f2933 !important;
+    }
+
+    div[data-testid="stMetricLabel"] {
+        color: #5f6c7b !important;
+    }
+
+    div[data-testid="stMetricLabel"] p {
+        color: #5f6c7b !important;
+    }
+
+    div[data-testid="stMetricValue"] {
+        color: #1f2933 !important;
+    }
+
+    div[data-testid="stMetricValue"] div {
+        color: #1f2933 !important;
+    }
+
+    div[data-testid="stMetricDelta"] {
+        color: #1f2933 !important;
+    }
+
+    /* Keep normal Streamlit text readable against our light background */
+    .stApp,
+    .stApp p,
+    .stApp label,
+    .stApp h1,
+    .stApp h2,
+    .stApp h3,
+    .stApp h4,
+    .stApp h5,
+    .stApp h6 {
+        color: #1f2933 !important;
+    }
+
+    /* Input text and placeholder */
+    .stTextInput input {
+        background-color: #ffffff !important;
+        color: #1f2933 !important;
+        caret-color: #1f2933 !important;
+    }
+
+    .stTextInput input::placeholder {
+        color: #8a96a3 !important;
+        opacity: 1 !important;
+    }
+
+    /* Expander content */
+    div[data-testid="stExpander"] {
+        background-color: #ffffff !important;
+        color: #1f2933 !important;
+    }
+
+    div[data-testid="stExpander"] * {
+        color: #1f2933 !important;
+    }
+
+    /* Alerts can inherit theme colours, so force readable text */
+    div[data-testid="stAlert"] p,
+    div[data-testid="stAlert"] div {
+        color: #1f2933 !important;
+    }
+
+    /* Keep button text white in every theme */
+    .stButton > button,
+    div[data-testid="stFormSubmitButton"] > button {
+        background-color: #1f2933 !important;
+        color: #ffffff !important;
+    }
+
+    .stButton > button *,
+    div[data-testid="stFormSubmitButton"] > button * {
+        color: #ffffff !important;
+    }
+
+    .stButton > button:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover {
+        background-color: #2f3b49 !important;
+        color: #ffffff !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
