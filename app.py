@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import socket
@@ -110,7 +109,6 @@ st.markdown(
         color: inherit;
     }
 
-
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button {
         background-color: #1f2933 !important;
@@ -139,7 +137,6 @@ st.markdown(
     div[data-testid="stFormSubmitButton"] > button p {
         color: #ffffff !important;
     }
-
 
     /* Keep Streamlit metric cards readable in every theme */
     div[data-testid="stMetric"] {
@@ -257,10 +254,6 @@ st.markdown(
 # ------------------------------------------------------------
 # KNOWN OFFICIAL DOMAINS
 # ------------------------------------------------------------
-# This is only used when there is strong evidence that a page
-# is pretending to be one of these brands.
-#
-# A normal social link does NOT count as brand impersonation.
 
 KNOWN_BRANDS = {
     "microsoft": [
@@ -383,6 +376,10 @@ def check_host_is_safe(hostname):
     if lower in ("localhost", "localhost.localdomain"):
         return False, "Local addresses are not allowed"
 
+    # Direct IP hostname
+    if is_private_or_local_ip(hostname):
+        return False, "Private or local network addresses are not allowed"
+
     addresses = resolve_ip(hostname)
 
     if not addresses:
@@ -398,6 +395,7 @@ def check_host_is_safe(hostname):
 def safe_request(url):
     current_url = url
     redirect_chain = []
+    response = None
 
     for _ in range(6):
         hostname = get_hostname(current_url)
@@ -430,6 +428,9 @@ def safe_request(url):
 
         return response, current_url, redirect_chain
 
+    if response is None:
+        raise Exception("The website could not be requested.")
+
     return response, current_url, redirect_chain
 
 
@@ -452,7 +453,6 @@ def get_tls_information(hostname):
                 result["valid"] = True
 
                 issuer_parts = cert.get("issuer", [])
-
                 issuer_text = []
 
                 for group in issuer_parts:
@@ -596,13 +596,26 @@ def get_browser_path():
     return None
 
 
-def inspect_page(final_url):
+# ------------------------------------------------------------
+# PLAYWRIGHT PAGE INSPECTION
+# ------------------------------------------------------------
+
+def inspect_page(start_url):
+    """
+    Open the URL in a real browser, allow wrapper/scanning pages to
+    redirect using JavaScript, wait for the final URL to stabilise,
+    then inspect and screenshot the actual landing page.
+    """
+
     result = {
         "title": "Unknown",
         "password_field": False,
         "email_field": False,
         "forms": [],
-        "screenshot": None
+        "screenshot": None,
+        "final_url": start_url,
+        "browser_redirects": [],
+        "browser_error": None
     }
 
     screenshot_path = "yeti_screenshot.png"
@@ -625,18 +638,145 @@ def inspect_page(final_url):
 
             browser = p.chromium.launch(**launch_options)
 
-            page = browser.new_page(
+            context = browser.new_context(
                 viewport={
                     "width": 1366,
                     "height": 768
                 }
             )
 
+            page = context.new_page()
+
+            navigation_urls = []
+
+            def track_navigation(frame):
+                if frame == page.main_frame:
+                    url = frame.url
+
+                    if url and url != "about:blank" and url not in navigation_urls:
+                        navigation_urls.append(url)
+
+            page.on("framenavigated", track_navigation)
+
+            # ------------------------------------------------
+            # BLOCK OBVIOUS PRIVATE/LOCAL BROWSER REQUESTS
+            # ------------------------------------------------
+            # This protects against common SSRF cases in the browser.
+            # We only block requests where the hostname is directly
+            # an IP/private/local host. DNS-backed hosts are rechecked
+            # after navigation before the result is accepted.
+
+            def route_handler(route):
+                request_url = route.request.url
+                parsed = urlparse(request_url)
+                hostname = parsed.hostname or ""
+
+                # Allow browser-internal/data/blob schemes.
+                if parsed.scheme not in ("http", "https"):
+                    route.continue_()
+                    return
+
+                if hostname.lower() in ("localhost", "localhost.localdomain"):
+                    route.abort()
+                    return
+
+                try:
+                    direct_ip = ip_address(hostname)
+
+                    if (
+                        direct_ip.is_private
+                        or direct_ip.is_loopback
+                        or direct_ip.is_link_local
+                        or direct_ip.is_reserved
+                        or direct_ip.is_multicast
+                        or direct_ip.is_unspecified
+                    ):
+                        route.abort()
+                        return
+
+                except ValueError:
+                    pass
+
+                route.continue_()
+
+            context.route("**/*", route_handler)
+
+            # Initial URL was already safety checked before Playwright.
             page.goto(
-                final_url,
+                start_url,
                 wait_until="domcontentloaded",
                 timeout=30000
             )
+
+            # Give wrapper pages time to start JS/meta redirects.
+            page.wait_for_timeout(1500)
+
+            # ------------------------------------------------
+            # WAIT FOR FINAL BROWSER URL TO STABILISE
+            # ------------------------------------------------
+            previous_url = None
+            stable_count = 0
+
+            # Maximum wait here is ~12 seconds.
+            # URL must remain unchanged for ~2 seconds.
+            for _ in range(24):
+                current_url = page.url
+
+                if current_url == previous_url:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+                    previous_url = current_url
+
+                if stable_count >= 4:
+                    break
+
+                page.wait_for_timeout(500)
+
+            # Give the actual landing page a chance to render.
+            try:
+                page.wait_for_load_state(
+                    "domcontentloaded",
+                    timeout=10000
+                )
+            except Exception:
+                pass
+
+            try:
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=8000
+                )
+            except Exception:
+                # Modern sites can keep analytics/websocket requests
+                # alive indefinitely, so networkidle is best effort.
+                pass
+
+            page.wait_for_timeout(1000)
+
+            actual_final_url = page.url
+            final_hostname = get_hostname(actual_final_url)
+
+            # Validate the actual final destination.
+            safe, message = check_host_is_safe(final_hostname)
+
+            if not safe:
+                browser.close()
+                raise Exception(
+                    f"Browser redirect blocked: {message}"
+                )
+
+            result["final_url"] = actual_final_url
+
+            result["browser_redirects"] = [
+                url
+                for url in navigation_urls
+                if url != start_url
+            ]
+
+            # ------------------------------------------------
+            # INSPECT FINAL PAGE
+            # ------------------------------------------------
 
             try:
                 result["title"] = page.title()
@@ -644,9 +784,11 @@ def inspect_page(final_url):
                 pass
 
             try:
-                result["password_field"] = page.locator(
-                    'input[type="password"]'
-                ).count() > 0
+                result["password_field"] = (
+                    page.locator(
+                        'input[type="password"]'
+                    ).count() > 0
+                )
             except Exception:
                 pass
 
@@ -657,15 +799,16 @@ def inspect_page(final_url):
                     'input[name*="user" i]'
                 )
 
-                result["email_field"] = page.locator(
-                    email_selectors
-                ).count() > 0
+                result["email_field"] = (
+                    page.locator(
+                        email_selectors
+                    ).count() > 0
+                )
             except Exception:
                 pass
 
             try:
                 forms = page.locator("form")
-
                 count = min(forms.count(), 20)
 
                 for i in range(count):
@@ -675,7 +818,7 @@ def inspect_page(final_url):
 
                     if action:
                         action = requests.compat.urljoin(
-                            final_url,
+                            actual_final_url,
                             action
                         )
 
@@ -683,6 +826,10 @@ def inspect_page(final_url):
 
             except Exception:
                 pass
+
+            # ------------------------------------------------
+            # SCREENSHOT FINAL LANDING PAGE
+            # ------------------------------------------------
 
             try:
                 page.screenshot(
@@ -697,11 +844,15 @@ def inspect_page(final_url):
 
             browser.close()
 
-    except Exception:
-        pass
+    except Exception as error:
+        result["browser_error"] = str(error)
 
     return result
 
+
+# ------------------------------------------------------------
+# ANALYSIS
+# ------------------------------------------------------------
 
 def analyse_url(url):
     result = {
@@ -719,21 +870,53 @@ def analyse_url(url):
         "brand_mismatch": False
     }
 
-    response, final_url, redirects = safe_request(url)
+    # First follow ordinary HTTP redirects safely.
+    response, requests_final_url, redirects = safe_request(url)
 
-    result["final_url"] = final_url
+    result["final_url"] = requests_final_url
     result["redirects"] = redirects
 
-    hostname = get_hostname(final_url)
+    # Then use Playwright to follow delayed JS/meta/security-wrapper
+    # redirects and reach the true browser landing page.
+    page_result = inspect_page(requests_final_url)
+    result["page"] = page_result
+
+    browser_final_url = page_result.get(
+        "final_url",
+        requests_final_url
+    ) or requests_final_url
+
+    # If Playwright failed entirely, keep the requests final URL.
+    if page_result.get("browser_error"):
+        browser_final_url = requests_final_url
+
+    # Merge browser redirects into the visible redirect chain.
+    for redirect_url in page_result.get("browser_redirects", []):
+        if (
+            redirect_url
+            and redirect_url != url
+            and redirect_url not in result["redirects"]
+        ):
+            result["redirects"].append(redirect_url)
+
+    result["final_url"] = browser_final_url
+
+    # All domain/certificate/RDAP analysis now uses the REAL landing page.
+    hostname = get_hostname(browser_final_url)
+
+    safe, message = check_host_is_safe(hostname)
+
+    if not safe:
+        raise Exception(message)
+
     registered_domain = get_registered_domain(hostname)
 
     result["hostname"] = hostname
     result["registered_domain"] = registered_domain
     result["ip_addresses"] = resolve_ip(hostname)
-
     result["rdap"] = get_rdap_information(registered_domain)
 
-    if final_url.startswith("https://"):
+    if browser_final_url.startswith("https://"):
         result["tls"] = get_tls_information(hostname)
     else:
         result["tls"] = {
@@ -742,8 +925,6 @@ def analyse_url(url):
             "issuer": "Unknown",
             "expires": "Unknown"
         }
-
-    result["page"] = inspect_page(final_url)
 
     page_title = result["page"].get("title", "")
 
@@ -780,6 +961,7 @@ def analyse_url(url):
                 "The domain was registered less than 6 months ago."
             )
 
+    # Compare what the user entered with the true browser landing domain.
     entered_domain = get_registered_domain(
         get_hostname(url)
     )
@@ -793,7 +975,7 @@ def analyse_url(url):
                 "The link redirected to a different registered domain."
             )
 
-    if len(redirects) >= 3:
+    if len(result["redirects"]) >= 3:
         result["score"] += 10
         result["reasons"].append(
             "The link used several redirects."
@@ -816,13 +998,13 @@ def analyse_url(url):
     except ValueError:
         pass
 
-    if "@" in final_url:
+    if "@" in browser_final_url:
         result["score"] += 20
         result["reasons"].append(
             "The URL contains an @ symbol, which can be misleading."
         )
 
-    if len(final_url) > 180:
+    if len(browser_final_url) > 180:
         result["score"] += 8
         result["reasons"].append(
             "The URL is unusually long."
@@ -834,17 +1016,17 @@ def analyse_url(url):
             "The page contains a password field."
         )
 
-    form_domains = []
-
     for action in result["page"].get("forms", []):
         if not action:
             continue
 
         form_host = get_hostname(action)
-        form_domain = get_registered_domain(form_host)
 
-        if form_domain:
-            form_domains.append(form_domain)
+        # Ignore unusual form actions that have no hostname.
+        if not form_host:
+            continue
+
+        form_domain = get_registered_domain(form_host)
 
         if form_domain and form_domain != final_domain:
             result["score"] += 25
@@ -853,6 +1035,7 @@ def analyse_url(url):
             )
             break
 
+    # Keep the score within the display range.
     result["score"] = min(result["score"], 100)
 
     if result["score"] >= 70:
@@ -870,7 +1053,6 @@ def analyse_url(url):
 # ------------------------------------------------------------
 # INPUT
 # ------------------------------------------------------------
-# A form means pressing Enter inside the box starts the check.
 
 with st.form("website_check", clear_on_submit=False):
     website = st.text_input(
@@ -883,7 +1065,7 @@ with st.form("website_check", clear_on_submit=False):
 
 
 # ------------------------------------------------------------
-# ANALYSIS
+# RUN CHECK
 # ------------------------------------------------------------
 
 if submitted:
@@ -1067,6 +1249,12 @@ if submitted:
             else "No"
         )
 
+        if result["page"].get("browser_error"):
+            st.write(
+                "Browser inspection note:",
+                result["page"]["browser_error"]
+            )
+
 
     with st.expander("Redirects"):
 
@@ -1114,4 +1302,3 @@ if submitted:
     if st.button("Reset", key="reset_button"):
         st.session_state["website_input"] = ""
         st.rerun()
-
