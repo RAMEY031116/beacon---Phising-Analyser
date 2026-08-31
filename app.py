@@ -8,7 +8,6 @@ import re
 import io
 import base64
 import hashlib
-from PIL import Image
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -50,6 +49,36 @@ MAX_LINKS_PER_CHECK = 8
 USE_PHISHTANK = True
 USE_OPENPHISH = True
 OPENPHISH_FEED = "https://openphish.com/feed.txt"
+
+
+def get_secret(name):
+    """
+    Read secrets safely from Streamlit Cloud first,
+    then fall back to environment variables.
+    """
+    try:
+        value = st.secrets.get(
+            name,
+            ""
+        )
+        if value:
+            return str(value)
+    except Exception:
+        pass
+
+    return os.getenv(
+        name,
+        ""
+    )
+
+
+GOOGLE_WEB_RISK_API_KEY = get_secret(
+    "GOOGLE_WEB_RISK_API_KEY"
+)
+
+PHISHTANK_APP_KEY = get_secret(
+    "PHISHTANK_APP_KEY"
+)
 
 
 # ------------------------------------------------------------
@@ -132,9 +161,9 @@ st.markdown(
         background: var(--yeti-card) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 10px;
-        padding: 0.7rem 0.85rem;
-        margin-top: 0.45rem;
-        margin-bottom: 0.45rem;
+        padding: 0.9rem 1rem;
+        margin-top: 0.7rem;
+        margin-bottom: 0.7rem;
         color: var(--yeti-text) !important;
     }
 
@@ -152,120 +181,24 @@ st.markdown(
     }
 
     .preview-wrap {
-        margin: 0 0 0.55rem 0;
-        width: 100%;
-    }
-
-    .preview-wrap a {
-        display: block;
-        width: 100%;
-        text-decoration: none !important;
+        margin: 0.5rem 0 1rem 0;
     }
 
     .preview-wrap img {
         width: 100%;
-        height: 175px;
+        max-width: 620px;
+        height: 330px;
         object-fit: cover;
         object-position: top;
-        border: 1px solid #d7dee7;
-        border-radius: 8px;
+        border: 1px solid var(--yeti-border);
+        border-radius: 9px;
         display: block;
         background: #ffffff;
-        cursor: zoom-in;
-        transition: transform 0.12s ease, box-shadow 0.12s ease;
-    }
-
-    .preview-wrap img:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.13);
     }
 
     .preview-note {
         color: var(--yeti-muted) !important;
-        font-size: 0.73rem;
-        margin-top: 0.25rem;
-    }
-
-    .website-tile {
-        background: #ffffff !important;
-        border: 1px solid #d7dee7 !important;
-        border-radius: 9px;
-        padding: 0.7rem;
-        margin-bottom: 0.4rem;
-        min-height: 0;
-    }
-
-    .website-tile * {
-        color: #17212b !important;
-    }
-
-    .website-tile-title {
-        font-size: 0.98rem;
-        line-height: 1.25;
-        font-weight: 700;
-        word-break: break-word;
-        margin-bottom: 0.15rem;
-    }
-
-    .website-tile-status {
-        color: #667085 !important;
-        font-size: 0.78rem;
-        margin-bottom: 0.35rem;
-    }
-
-    .website-tile-facts {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.35rem;
-        margin-top: 0.45rem;
-    }
-
-    .website-tile-fact {
-        border-top: 1px solid #e5eaf0;
-        padding-top: 0.35rem;
-        min-width: 0;
-    }
-
-    .website-tile-label {
-        display: block;
-        color: #667085 !important;
-        font-size: 0.68rem;
-        line-height: 1.15;
-    }
-
-    .website-tile-value {
-        display: block;
-        color: #17212b !important;
-        font-size: 0.83rem;
-        font-weight: 650;
-        line-height: 1.2;
-        margin-top: 0.08rem;
-        overflow-wrap: anywhere;
-    }
-
-    .website-tile-reason {
-        margin-top: 0.5rem;
-        font-size: 0.79rem;
-        line-height: 1.35;
-        color: #344054 !important;
-    }
-
-    .tile-domain {
-        font-size: 1rem;
-        font-weight: 700;
-        margin-bottom: 0.1rem;
-        word-break: break-word;
-    }
-
-    .tile-status {
-        font-size: 0.84rem;
-        color: var(--yeti-muted) !important;
-        margin-bottom: 0.45rem;
-    }
-
-    .tile-summary {
         font-size: 0.88rem;
-        line-height: 1.35;
         margin-top: 0.35rem;
     }
 
@@ -314,36 +247,12 @@ st.markdown(
 
     div[data-testid="stExpander"] {
         background: #ffffff !important;
-        border: 1px solid #d7dee7 !important;
+        border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
-        overflow: hidden !important;
     }
 
-    div[data-testid="stExpander"] details,
-    div[data-testid="stExpander"] summary {
-        background: #ffffff !important;
-        color: #17212b !important;
-    }
-
-    div[data-testid="stExpander"] summary {
-        min-height: 2.6rem !important;
-        padding: 0.15rem 0.35rem !important;
-    }
-
-    div[data-testid="stExpander"] summary:hover {
-        background: #eef4f8 !important;
-    }
-
-    div[data-testid="stExpander"] *,
-    div[data-testid="stExpander"] svg {
-        color: #17212b !important;
-        fill: currentColor !important;
-    }
-
-    div[data-testid="stExpander"] p,
-    div[data-testid="stExpander"] span,
-    div[data-testid="stExpander"] label {
-        color: #17212b !important;
+    div[data-testid="stExpander"] * {
+        color: var(--yeti-text) !important;
     }
 
     div[data-testid="stAlert"] *,
@@ -394,111 +303,6 @@ st.markdown(
     section[data-testid="stFileUploaderDropzone"] button * {
         color: #ffffff !important;
     }
-
-    /* Streamlit top chrome: keep it visually consistent instead of a black strip */
-    header[data-testid="stHeader"] {
-        background: rgba(244, 247, 251, 0.96) !important;
-        border-bottom: 1px solid #d7dee7 !important;
-    }
-
-    div[data-testid="stToolbar"] {
-        background: transparent !important;
-    }
-
-    div[data-testid="stDecoration"] {
-        background: #2e5f8a !important;
-    }
-
-    button[data-testid="stBaseButton-headerNoPadding"],
-    button[data-testid="stBaseButton-header"] {
-        color: #17212b !important;
-        background: transparent !important;
-    }
-
-    /* Full-page screenshot lightbox */
-    .yeti-lightbox {
-        display: none;
-        position: fixed;
-        inset: 0;
-        z-index: 999999;
-        background: rgba(10, 16, 24, 0.94);
-        padding: 20px;
-        overflow: auto;
-        box-sizing: border-box;
-    }
-
-    .yeti-lightbox:target {
-        display: block;
-    }
-
-    .yeti-lightbox-shell {
-        width: min(1400px, 96vw);
-        margin: 0 auto;
-        background: #ffffff;
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: 0 18px 55px rgba(0,0,0,0.35);
-    }
-
-    .yeti-lightbox-bar {
-        position: sticky;
-        top: 0;
-        z-index: 2;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 10px 14px;
-        background: #ffffff;
-        border-bottom: 1px solid #d7dee7;
-        color: #17212b !important;
-        font-size: 0.9rem;
-        font-weight: 650;
-    }
-
-    .yeti-lightbox-close {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 38px;
-        height: 38px;
-        padding: 0 12px;
-        border-radius: 8px;
-        background: #224867;
-        color: #ffffff !important;
-        text-decoration: none !important;
-        font-weight: 700;
-    }
-
-    .yeti-lightbox-close:hover {
-        background: #2e5f8a;
-        color: #ffffff !important;
-    }
-
-    .yeti-lightbox-image {
-        display: block;
-        width: 100%;
-        height: auto;
-        max-width: none;
-        margin: 0;
-        background: #ffffff;
-    }
-
-    .preview-wrap img {
-        cursor: zoom-in !important;
-    }
-
-    @media (max-width: 700px) {
-        .yeti-lightbox {
-            padding: 8px;
-        }
-
-        .yeti-lightbox-shell {
-            width: 100%;
-            border-radius: 8px;
-        }
-    }
-
     </style>
     """,
     unsafe_allow_html=True
@@ -1361,6 +1165,146 @@ def check_openphish(url):
     return result
 
 
+
+def check_google_webrisk(url):
+    """
+    Check Google's Web Risk live lookup service for phishing /
+    social-engineering reports.
+
+    A positive result is strong evidence that Google currently
+    considers the URL unsafe. A negative result is NOT a guarantee
+    that the site is genuine.
+    """
+
+    result = {
+        "configured": bool(
+            GOOGLE_WEB_RISK_API_KEY
+        ),
+        "checked": False,
+        "confirmed": False,
+        "threat_types": [],
+        "error": ""
+    }
+
+    if not GOOGLE_WEB_RISK_API_KEY:
+        return result
+
+    try:
+        response = requests.get(
+            "https://webrisk.googleapis.com/v1/uris:search",
+            params=[
+                (
+                    "threatTypes",
+                    "SOCIAL_ENGINEERING"
+                ),
+                (
+                    "uri",
+                    url
+                ),
+                (
+                    "key",
+                    GOOGLE_WEB_RISK_API_KEY
+                )
+            ],
+            timeout=12,
+            headers={
+                "User-Agent": "YetiCheck/1.0"
+            }
+        )
+
+        if response.status_code == 200:
+            result["checked"] = True
+
+            data = response.json()
+
+            threat = data.get(
+                "threat"
+            )
+
+            if threat:
+                result["confirmed"] = True
+                result["threat_types"] = threat.get(
+                    "threatTypes",
+                    []
+                )
+
+        else:
+            result["error"] = (
+                f"Google Web Risk returned HTTP {response.status_code}"
+            )
+
+    except Exception as error:
+        result["error"] = str(
+            error
+        )
+
+    return result
+
+
+def check_google_webrisk_chain(
+    original_url,
+    redirects,
+    final_url
+):
+    """
+    Check every important URL in the redirect chain, because a
+    harmless-looking short link may redirect to a known phishing URL.
+    """
+
+    checked_urls = []
+
+    for item in (
+        [original_url]
+        + list(redirects)
+        + [final_url]
+    ):
+        if item and item not in checked_urls:
+            checked_urls.append(
+                item
+            )
+
+    overall = {
+        "configured": bool(
+            GOOGLE_WEB_RISK_API_KEY
+        ),
+        "checked": False,
+        "confirmed": False,
+        "matched_url": "",
+        "threat_types": [],
+        "error": ""
+    }
+
+    for item in checked_urls:
+        result = check_google_webrisk(
+            item
+        )
+
+        if result.get(
+            "checked"
+        ):
+            overall["checked"] = True
+
+        if result.get(
+            "error"
+        ):
+            overall["error"] = result[
+                "error"
+            ]
+
+        if result.get(
+            "confirmed"
+        ):
+            overall["confirmed"] = True
+            overall["matched_url"] = item
+            overall["threat_types"] = result.get(
+                "threat_types",
+                []
+            )
+            break
+
+    return overall
+
+
 def check_phishtank(url):
     result = {
         "checked": False,
@@ -1375,7 +1319,14 @@ def check_phishtank(url):
             "https://checkurl.phishtank.com/checkurl/",
             data={
                 "url": url,
-                "format": "json"
+                "format": "json",
+                **(
+                    {
+                        "app_key": PHISHTANK_APP_KEY
+                    }
+                    if PHISHTANK_APP_KEY
+                    else {}
+                )
             },
             timeout=10,
             headers={
@@ -1954,7 +1905,7 @@ def inspect_page(browser_url):
             try:
                 page.screenshot(
                     path=screenshot_path,
-                    full_page=True
+                    full_page=False
                 )
 
                 result["screenshot"] = screenshot_path
@@ -1975,176 +1926,44 @@ def inspect_page(browser_url):
     return result
 
 
-def make_preview_thumbnail(
-    screenshot_path,
-    width=720,
-    height=420
-):
-    """
-    Create a real thumbnail from the TOP of the full-page screenshot.
-    The full screenshot is kept unchanged for the click-to-enlarge view.
-    """
-
-    try:
-        image = Image.open(
-            screenshot_path
-        ).convert("RGB")
-
-        original_width, original_height = image.size
-
-        # Crop a browser-like area from the top of the full-page image.
-        desired_ratio = width / height
-        crop_height = int(
-            original_width / desired_ratio
-        )
-
-        crop_height = min(
-            crop_height,
-            original_height
-        )
-
-        cropped = image.crop(
-            (
-                0,
-                0,
-                original_width,
-                crop_height
-            )
-        )
-
-        cropped.thumbnail(
-            (width, height)
-        )
-
-        buffer = io.BytesIO()
-
-        cropped.save(
-            buffer,
-            format="JPEG",
-            quality=82,
-            optimize=True
-        )
-
-        return buffer.getvalue()
-
-    except Exception:
-        return None
-
-
 def render_clickable_preview(
     screenshot_path,
     caption="Website preview"
 ):
     """
-    Show a small thumbnail in the result tile.
-
-    Clicking the screenshot itself opens an in-page lightbox.
-    The full screenshot is rendered at a readable width and the
-    viewer scrolls vertically through the whole captured website.
+    Show a fixed-size preview.
+    Clicking it opens the screenshot at full browser size in a new tab.
     """
 
-    if (
-        not screenshot_path
-        or not os.path.exists(
-            screenshot_path
-        )
+    if not screenshot_path or not os.path.exists(
+        screenshot_path
     ):
         return
 
     try:
-        full_bytes = Path(
+        image_bytes = Path(
             screenshot_path
         ).read_bytes()
 
-        full_encoded = base64.b64encode(
-            full_bytes
+        encoded = base64.b64encode(
+            image_bytes
         ).decode(
             "ascii"
         )
 
-        full_data_url = (
+        data_url = (
             "data:image/png;base64,"
-            + full_encoded
-        )
-
-        thumbnail_bytes = make_preview_thumbnail(
-            screenshot_path
-        )
-
-        if thumbnail_bytes:
-            thumb_encoded = base64.b64encode(
-                thumbnail_bytes
-            ).decode(
-                "ascii"
-            )
-
-            thumb_data_url = (
-                "data:image/jpeg;base64,"
-                + thumb_encoded
-            )
-        else:
-            thumb_data_url = (
-                full_data_url
-            )
-
-        viewer_id = (
-            "yeti-view-"
-            + hashlib.sha256(
-                screenshot_path.encode(
-                    "utf-8",
-                    errors="ignore"
-                )
-            ).hexdigest()[:10]
-        )
-
-        safe_caption = (
-            caption.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
+            + encoded
         )
 
         st.markdown(
             f"""
             <div class="preview-wrap">
-                <a
-                    href="#{viewer_id}"
-                    title="Open full webpage screenshot"
-                    aria-label="Open full webpage screenshot for {safe_caption}"
-                >
-                    <img
-                        src="{thumb_data_url}"
-                        alt="{safe_caption}"
-                    >
+                <a href="{data_url}" target="_blank" title="Open larger screenshot">
+                    <img src="{data_url}" alt="{caption}">
                 </a>
-
                 <div class="preview-note">
-                    Click image to view the full webpage.
-                </div>
-            </div>
-
-            <div
-                id="{viewer_id}"
-                class="yeti-lightbox"
-                aria-label="Full webpage screenshot viewer"
-            >
-                <div class="yeti-lightbox-shell">
-                    <div class="yeti-lightbox-bar">
-                        <span>{safe_caption} — full-page screenshot</span>
-                        <a
-                            href="#"
-                            class="yeti-lightbox-close"
-                            aria-label="Close screenshot"
-                        >
-                            Close
-                        </a>
-                    </div>
-
-                    <img
-                        class="yeti-lightbox-image"
-                        src="{full_data_url}"
-                        alt="Full webpage screenshot of {safe_caption}"
-                    >
+                    Click the preview to open it larger.
                 </div>
             </div>
             """,
@@ -2197,7 +2016,8 @@ def analyse_url(url):
         "tls": {},
         "page": {},
         "phish_tank": {},
-        "openphish": {}
+        "openphish": {},
+        "google_webrisk": {}
     }
 
     response, final_url, redirects = safe_request(
@@ -2238,7 +2058,15 @@ def analyse_url(url):
         hostname
     )
 
-    # Reputation
+    # Reputation databases
+    result["google_webrisk"] = (
+        check_google_webrisk_chain(
+            url,
+            redirects,
+            final_url
+        )
+    )
+
     result["phish_tank"] = check_phishtank(
         final_url
     )
@@ -2246,6 +2074,15 @@ def analyse_url(url):
     result["openphish"] = check_openphish(
         final_url
     )
+
+    if result["google_webrisk"].get(
+        "confirmed"
+    ):
+        result["score"] += 90
+
+        result["reasons"].append(
+            "Google Web Risk reports this URL as a social-engineering/phishing threat."
+        )
 
     if result["phish_tank"].get(
         "confirmed"
@@ -2516,6 +2353,20 @@ if "qr_reset_counter" not in st.session_state:
 # INPUT
 # ------------------------------------------------------------
 
+st.markdown(
+    """
+    <div class="help-box">
+        <strong>How to check several links:</strong><br>
+        Paste one link per line, or paste the whole email/message and Yeti will find the links automatically.<br><br>
+        Example:<br>
+        tesco.com<br>
+        https://microsoft.com<br>
+        https://example.co.uk/login
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 current_text = st.session_state.get(
     "yeti_text",
     ""
@@ -2537,7 +2388,8 @@ text_height = min(
 pasted_text = st.text_area(
     "Links or message",
     placeholder=(
-        "Paste a link, several links one per line, or paste the whole suspicious message"
+        "Paste one link, several links (one per line), "
+        "or paste the whole suspicious message here"
     ),
     height=text_height,
     key="yeti_text"
@@ -2802,7 +2654,8 @@ if submitted:
                 "tls": {},
                 "page": {},
                 "phish_tank": {},
-                "openphish": {}
+                "openphish": {},
+                "google_webrisk": {}
             }
 
         results.append(
@@ -2889,300 +2742,296 @@ if submitted:
                 low
             )
 
-    # Compact product-style cards.
-    # Three cards per row on desktop; Streamlit naturally stacks on narrow screens.
-    columns_per_row = 3 if len(results) > 1 else 1
-
-    for row_start in range(
-        0,
-        len(results),
-        columns_per_row
-    ):
-        row_items = results[
-            row_start:row_start + columns_per_row
-        ]
-
-        if columns_per_row == 1:
-            outer_columns = st.columns(
-                [0.2, 0.6, 0.2]
+    for result in results:
+        domain = (
+            result.get(
+                "registered_domain"
             )
-            active_columns = [
-                outer_columns[1]
-            ]
-        else:
-            active_columns = st.columns(
-                columns_per_row,
-                gap="medium"
-            )
+            or result["url"]
+        )
 
-        for column, result in zip(
-            active_columns,
-            row_items
+        age = result.get(
+            "rdap",
+            {}
+        ).get(
+            "age_days"
+        )
+
+        tls = result.get(
+            "tls",
+            {}
+        )
+
+        expiry = tls.get(
+            "expires",
+            "Unknown"
+        )
+
+        days_left = certificate_days_left(
+            expiry
+        )
+
+        preview = result.get(
+            "page",
+            {}
+        )
+
+        screenshot = preview.get(
+            "screenshot"
+        )
+
+        st.markdown(
+            f"""
+            <div class="result-card">
+                <div class="result-title">{domain}</div>
+                <div class="muted">
+                    {result.get("site_status", "Unknown")}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # Clear, normal browser-sized screenshot.
+        if (
+            screenshot
+            and os.path.exists(
+                screenshot
+            )
         ):
-            with column:
-                domain = (
-                    result.get(
-                        "registered_domain"
-                    )
-                    or result["url"]
+            st.image(
+                screenshot,
+                caption="Website preview",
+                width=760
+            )
+
+        elif preview.get(
+            "preview_status"
+        ) == "blocked":
+            st.info(
+                preview.get(
+                    "preview_message",
+                    "The website blocked the automated preview."
                 )
+            )
 
-                age = result.get(
-                    "rdap",
-                    {}
-                ).get(
-                    "age_days"
-                )
+        elif preview.get(
+            "preview_status"
+        ) == "failed":
+            st.info(
+                "The website preview could not be loaded."
+            )
 
-                tls = result.get(
-                    "tls",
-                    {}
-                )
+        c1, c2, c3, c4 = st.columns(
+            4
+        )
 
-                expiry = tls.get(
-                    "expires",
-                    "Unknown"
-                )
+        with c1:
+            st.metric(
+                "Risk",
+                result["verdict"]
+            )
 
-                days_left = certificate_days_left(
-                    expiry
-                )
-
-                preview = result.get(
-                    "page",
-                    {}
-                )
-
-                screenshot = preview.get(
-                    "screenshot"
-                )
-
-                if days_left is None:
-                    cert_text = "Unknown"
-                elif days_left < 0:
-                    cert_text = "Expired"
-                else:
-                    cert_text = f"{days_left} days"
-
-                # Card header.
-                st.markdown(
-                    f"""
-                    <div class="website-tile">
-                        <div class="website-tile-title">{domain}</div>
-                        <div class="website-tile-status">
-                            {result.get("site_status", "Unknown")}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-                # A TRUE small thumbnail, not the full long image squeezed into the card.
-                if (
-                    screenshot
-                    and os.path.exists(
-                        screenshot
-                    )
-                ):
-                    render_clickable_preview(
-                        screenshot,
-                        caption=domain
-                    )
-
-                elif preview.get(
-                    "preview_status"
-                ) == "blocked":
-                    st.info(
-                        "Website preview blocked."
-                    )
-
-                elif preview.get(
-                    "preview_status"
-                ) == "failed":
-                    st.info(
-                        "Preview unavailable."
-                    )
-
-                # Compact card facts instead of four large Streamlit metric boxes.
-                reason = (
-                    result["reasons"][0]
-                    if result.get(
-                        "reasons"
-                    )
-                    else "No major phishing indicators were found."
-                )
-
-                age_text = (
+        with c2:
+            st.metric(
+                "Domain age",
+                (
                     f"{age} days"
                     if age is not None
                     else "Unknown"
                 )
+            )
 
-                https_text = (
+        with c3:
+            st.metric(
+                "HTTPS",
+                (
                     "Valid"
                     if tls.get(
                         "valid"
                     )
                     else "Not validated"
                 )
+            )
 
-                st.markdown(
-                    f"""
-                    <div class="website-tile">
-                        <div class="website-tile-facts">
-                            <div class="website-tile-fact">
-                                <span class="website-tile-label">Risk</span>
-                                <span class="website-tile-value">{result["verdict"]}</span>
-                            </div>
-                            <div class="website-tile-fact">
-                                <span class="website-tile-label">Domain age</span>
-                                <span class="website-tile-value">{age_text}</span>
-                            </div>
-                            <div class="website-tile-fact">
-                                <span class="website-tile-label">HTTPS</span>
-                                <span class="website-tile-value">{https_text}</span>
-                            </div>
-                            <div class="website-tile-fact">
-                                <span class="website-tile-label">Certificate</span>
-                                <span class="website-tile-value">{cert_text}</span>
-                            </div>
-                        </div>
-                        <div class="website-tile-reason">{reason}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
+        with c4:
+            if days_left is None:
+                cert_text = "Unknown"
+            elif days_left < 0:
+                cert_text = "Expired"
+            else:
+                cert_text = (
+                    f"{days_left} days"
                 )
 
-                # Useful details always sit at the bottom of the website card.
-                with st.expander(
-                    "Website details"
-                ):
-                    st.write(
-                        "Risk score:",
-                        f"{result.get('score', 0)}/100"
-                    )
+            st.metric(
+                "Certificate",
+                cert_text
+            )
 
-                    st.write(
-                        "Original address:",
-                        result["url"]
-                    )
+        google = result.get(
+            "google_webrisk",
+            {}
+        )
 
-                    st.write(
-                        "Final address:",
-                        result.get(
-                            "final_url",
-                            result["url"]
+        phishtank = result.get(
+            "phish_tank",
+            {}
+        )
+
+        openphish = result.get(
+            "openphish",
+            {}
+        )
+
+        # Reputation is now an important visible part of the result.
+        if google.get(
+            "confirmed"
+        ):
+            st.error(
+                "Google Web Risk: Reported as phishing / social engineering"
+            )
+        elif google.get(
+            "checked"
+        ):
+            st.success(
+                "Google Web Risk: No current phishing match found"
+            )
+        elif not google.get(
+            "configured"
+        ):
+            st.info(
+                "Google Web Risk: API key not configured"
+            )
+        else:
+            st.info(
+                "Google Web Risk: Check unavailable"
+            )
+
+        if result.get(
+            "reasons"
+        ):
+            st.write(
+                result["reasons"][0]
+            )
+        else:
+            st.write(
+                "No major phishing indicators were found. "
+                "This is not a guarantee that the website is genuine."
+            )
+
+        with st.expander(
+            "Website details"
+        ):
+            st.write(
+                "Original address:",
+                result["url"]
+            )
+
+            st.write(
+                "Final address:",
+                result.get(
+                    "final_url",
+                    result["url"]
+                )
+            )
+
+            st.write(
+                "HTTP status:",
+                result.get(
+                    "status_code",
+                    "Unknown"
+                )
+            )
+
+            st.write(
+                "Registrar:",
+                result.get(
+                    "rdap",
+                    {}
+                ).get(
+                    "registrar",
+                    "Unknown"
+                )
+            )
+
+            st.write(
+                "Certificate issuer:",
+                tls.get(
+                    "issuer",
+                    "Unknown"
+                )
+            )
+
+            st.write(
+                "Google Web Risk:",
+                (
+                    "Reported unsafe"
+                    if google.get(
+                        "confirmed"
+                    )
+                    else (
+                        "No match found"
+                        if google.get(
+                            "checked"
                         )
-                    )
-
-                    st.write(
-                        "Website status:",
-                        result.get(
-                            "site_status",
-                            "Unknown"
-                        )
-                    )
-
-                    st.write(
-                        "HTTP status:",
-                        result.get(
-                            "status_code",
-                            "Unknown"
-                        )
-                    )
-
-                    st.write(
-                        "Domain age:",
-                        age_text
-                    )
-
-                    st.write(
-                        "Registrar:",
-                        result.get(
-                            "rdap",
-                            {}
-                        ).get(
-                            "registrar",
-                            "Unknown"
-                        )
-                    )
-
-                    st.write(
-                        "HTTPS:",
-                        https_text
-                    )
-
-                    st.write(
-                        "Certificate expires:",
-                        cert_text
-                    )
-
-                    st.write(
-                        "Certificate issuer:",
-                        tls.get(
-                            "issuer",
-                            "Unknown"
-                        )
-                    )
-
-                    st.write(
-                        "PhishTank:",
-                        (
-                            "Verified phishing match"
-                            if result.get(
-                                "phish_tank",
-                                {}
-                            ).get(
-                                "confirmed"
+                        else (
+                            "API key not configured"
+                            if not google.get(
+                                "configured"
                             )
-                            else (
-                                "No verified match"
-                                if result.get(
-                                    "phish_tank",
-                                    {}
-                                ).get(
-                                    "checked"
-                                )
-                                else "Check unavailable"
-                            )
+                            else "Check unavailable"
                         )
                     )
+                )
+            )
 
+            st.write(
+                "PhishTank:",
+                (
+                    "Verified phishing match"
+                    if phishtank.get(
+                        "confirmed"
+                    )
+                    else (
+                        "No verified match"
+                        if phishtank.get(
+                            "checked"
+                        )
+                        else "Check unavailable"
+                    )
+                )
+            )
+
+            st.write(
+                "OpenPhish:",
+                (
+                    "Listed in community feed"
+                    if openphish.get(
+                        "confirmed"
+                    )
+                    else (
+                        "No match found"
+                        if openphish.get(
+                            "checked"
+                        )
+                        else "Check unavailable"
+                    )
+                )
+            )
+
+            if result.get(
+                "reasons"
+            ):
+                st.write(
+                    "Findings:"
+                )
+
+                for finding in result[
+                    "reasons"
+                ][:8]:
                     st.write(
-                        "OpenPhish:",
-                        (
-                            "Listed in community feed"
-                            if result.get(
-                                "openphish",
-                                {}
-                            ).get(
-                                "confirmed"
-                            )
-                            else (
-                                "No match found"
-                                if result.get(
-                                    "openphish",
-                                    {}
-                                ).get(
-                                    "checked"
-                                )
-                                else "Check unavailable"
-                            )
-                        )
+                        finding
                     )
 
-                    if result.get(
-                        "reasons"
-                    ):
-                        st.write(
-                            "Findings:"
-                        )
-
-                        for finding in result[
-                            "reasons"
-                        ][:8]:
-                            st.write(
-                                finding
-                            )
-
-                st.write("")
+        st.divider()
