@@ -88,116 +88,82 @@ PHISHTANK_APP_KEY = get_secret(
 st.markdown(
     """
     <style>
-    /*
-    Yeti follows the active Streamlit Light/Dark theme.
-    These variables are provided by Streamlit itself.
-    */
     :root {
-        --yeti-bg: var(--background-color);
-        --yeti-surface: var(--secondary-background-color);
-        --yeti-text: var(--text-color);
-        --yeti-accent: var(--primary-color);
-        --yeti-border: color-mix(in srgb, var(--text-color) 18%, transparent);
-        --yeti-muted: color-mix(in srgb, var(--text-color) 66%, transparent);
+        --yeti-page: #f6f8fb;
+        --yeti-surface: #ffffff;
+        --yeti-text: #17212b;
+        --yeti-muted: #667085;
+        --yeti-border: #d7dee7;
+        --yeti-blue: #295f86;
+        --yeti-blue-hover: #1f4d6e;
+        --yeti-soft: #eef4f8;
     }
 
     html, body, .stApp {
-        background: var(--yeti-bg) !important;
+        background: var(--yeti-page) !important;
         color: var(--yeti-text) !important;
     }
 
     .block-container {
-        max-width: 1080px;
+        max-width: 980px;
         padding-top: 1.2rem;
         padding-bottom: 3rem;
     }
 
-    /*
-    Remove Streamlit's dark top strip / decoration.
-    The app still works normally without it.
-    */
-    header[data-testid="stHeader"] {
-        background: transparent !important;
-        height: 0 !important;
-        min-height: 0 !important;
-    }
-
-    div[data-testid="stToolbar"],
+    /* Remove the distracting Streamlit black/coloured top strip */
     div[data-testid="stDecoration"] {
         display: none !important;
     }
 
-    #MainMenu,
-    footer {
-        visibility: hidden !important;
+    header[data-testid="stHeader"] {
+        background: rgba(246,248,251,0.96) !important;
+        border-bottom: 1px solid #e4e9ef !important;
     }
 
-    /* Header / Yeti logo */
+    div[data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+
+    /* Yeti header */
     .yeti-header {
         display: flex;
         justify-content: center;
-        margin: 0.15rem 0 0.2rem 0;
+        margin: 0.25rem 0 0.1rem 0;
     }
 
     .yeti-home {
         display: inline-flex;
         align-items: center;
-        gap: 0.7rem;
+        gap: 0.65rem;
         text-decoration: none !important;
-        padding: 0.35rem 0.55rem;
-        border-radius: 12px;
-        color: var(--yeti-text) !important;
+        padding: 0.3rem 0.45rem;
+        border-radius: 10px;
     }
 
     .yeti-home:hover {
-        background: var(--yeti-surface) !important;
+        background: var(--yeti-soft) !important;
     }
 
     .yeti-logo {
-        width: 52px;
-        height: 52px;
-        flex: 0 0 52px;
+        width: 48px;
+        height: 48px;
+        flex: 0 0 48px;
     }
 
     .yeti-wordmark {
-        font-size: 2.15rem;
+        font-size: 2rem;
         font-weight: 750;
-        letter-spacing: -0.035em;
+        letter-spacing: -0.03em;
         color: var(--yeti-text) !important;
     }
 
     .yeti-subtitle {
         text-align: center;
         color: var(--yeti-muted) !important;
-        margin-bottom: 1.15rem;
-        font-size: 0.95rem;
+        margin-bottom: 1rem;
+        font-size: 0.93rem;
     }
 
-    /* Cards */
-    .result-card {
-        background: var(--yeti-surface) !important;
-        border: 1px solid var(--yeti-border) !important;
-        border-radius: 10px;
-        padding: 0.8rem 0.95rem;
-        margin: 0.65rem 0;
-        color: var(--yeti-text) !important;
-    }
-
-    .result-card * {
-        color: var(--yeti-text) !important;
-    }
-
-    .result-title {
-        font-size: 1.08rem;
-        font-weight: 700;
-        color: var(--yeti-text) !important;
-    }
-
-    .muted {
-        color: var(--yeti-muted) !important;
-    }
-
-    /* General text */
     .stApp p,
     .stApp span,
     .stApp label,
@@ -210,87 +176,60 @@ st.markdown(
         color: var(--yeti-text) !important;
     }
 
-    /* Inputs */
+    /* Main textarea */
     .stTextArea textarea,
     .stTextInput input {
-        background: var(--yeti-surface) !important;
-        color: var(--yeti-text) !important;
-        caret-color: var(--yeti-text) !important;
-        border: 1px solid var(--yeti-border) !important;
-        border-radius: 8px !important;
+        background: #ffffff !important;
+        color: #17212b !important;
+        caret-color: #17212b !important;
+        border: 1px solid #cbd4df !important;
+        border-radius: 9px !important;
+        box-shadow: none !important;
+    }
+
+    .stTextArea textarea:focus,
+    .stTextInput input:focus {
+        border-color: var(--yeti-blue) !important;
+        box-shadow: 0 0 0 1px var(--yeti-blue) !important;
     }
 
     .stTextArea textarea::placeholder,
     .stTextInput input::placeholder {
-        color: var(--yeti-muted) !important;
-        opacity: 0.9 !important;
+        color: #8994a3 !important;
+        opacity: 1 !important;
     }
 
-    /* Metrics */
-    div[data-testid="stMetric"] {
-        background: var(--yeti-surface) !important;
-        border: 1px solid var(--yeti-border) !important;
+    /* Uploaders */
+    section[data-testid="stFileUploaderDropzone"] {
+        background: #ffffff !important;
+        border: 1px dashed #bfc9d5 !important;
         border-radius: 9px !important;
-        padding: 0.65rem !important;
+        min-height: 105px !important;
     }
 
-    div[data-testid="stMetric"] *,
-    div[data-testid="stMetricValue"],
-    div[data-testid="stMetricValue"] * {
-        color: var(--yeti-text) !important;
+    section[data-testid="stFileUploaderDropzone"] *,
+    div[data-testid="stFileUploader"] * {
+        color: #17212b !important;
     }
 
-    div[data-testid="stMetricLabel"],
-    div[data-testid="stMetricLabel"] * {
-        color: var(--yeti-muted) !important;
+    section[data-testid="stFileUploaderDropzone"] button {
+        background: #eef4f8 !important;
+        color: #23445b !important;
+        border: 1px solid #bdd0dc !important;
+        border-radius: 7px !important;
     }
 
-    /* Expanders */
-    div[data-testid="stExpander"] {
-        background: var(--yeti-surface) !important;
-        border: 1px solid var(--yeti-border) !important;
-        border-radius: 9px !important;
-        overflow: hidden !important;
+    section[data-testid="stFileUploaderDropzone"] button * {
+        color: #23445b !important;
     }
 
-    div[data-testid="stExpander"] details,
-    div[data-testid="stExpander"] summary {
-        background: var(--yeti-surface) !important;
-        color: var(--yeti-text) !important;
-    }
-
-    div[data-testid="stExpander"] summary:hover {
-        background: color-mix(
-            in srgb,
-            var(--yeti-surface) 88%,
-            var(--yeti-text) 12%
-        ) !important;
-    }
-
-    div[data-testid="stExpander"] *,
-    div[data-testid="stExpander"] svg {
-        color: var(--yeti-text) !important;
-        fill: currentColor !important;
-    }
-
-    /* Alerts */
-    div[data-testid="stAlert"],
-    div[data-testid="stNotification"] {
-        color: var(--yeti-text) !important;
-    }
-
-    div[data-testid="stAlert"] *,
-    div[data-testid="stNotification"] * {
-        color: var(--yeti-text) !important;
-    }
-
-    /* Buttons - theme aware, always readable */
+    /* Main buttons */
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button,
     div[data-testid="stDownloadButton"] button {
-        background: var(--yeti-accent) !important;
+        background: var(--yeti-blue) !important;
         color: #ffffff !important;
-        border: 1px solid var(--yeti-accent) !important;
+        border: 1px solid var(--yeti-blue) !important;
         border-radius: 8px !important;
         font-weight: 650 !important;
         min-height: 2.55rem;
@@ -305,46 +244,118 @@ st.markdown(
     .stButton > button:hover,
     div[data-testid="stFormSubmitButton"] > button:hover,
     div[data-testid="stDownloadButton"] button:hover {
-        filter: brightness(1.08);
+        background: var(--yeti-blue-hover) !important;
+        border-color: var(--yeti-blue-hover) !important;
         color: #ffffff !important;
     }
 
-    /* Uploaders */
-    section[data-testid="stFileUploaderDropzone"] {
-        background: var(--yeti-surface) !important;
-        color: var(--yeti-text) !important;
-        border-color: var(--yeti-border) !important;
+    /* Results */
+    .result-card {
+        background: #ffffff !important;
+        border: 1px solid var(--yeti-border) !important;
+        border-radius: 10px;
+        padding: 0.75rem 0.9rem;
+        margin: 0.65rem 0;
     }
 
-    section[data-testid="stFileUploaderDropzone"] * {
-        color: var(--yeti-text) !important;
+    .result-card * {
+        color: #17212b !important;
     }
 
-    section[data-testid="stFileUploaderDropzone"] button {
-        background: var(--yeti-accent) !important;
-        color: #ffffff !important;
-        border: 1px solid var(--yeti-accent) !important;
+    .result-title {
+        font-size: 1.05rem;
+        font-weight: 700;
     }
 
-    section[data-testid="stFileUploaderDropzone"] button * {
-        color: #ffffff !important;
+    .muted {
+        color: #667085 !important;
+        font-size: 0.86rem;
+    }
+
+    div[data-testid="stMetric"] {
+        background: #ffffff !important;
+        border: 1px solid var(--yeti-border) !important;
+        border-radius: 9px !important;
+        padding: 0.65rem !important;
+    }
+
+    div[data-testid="stMetric"] *,
+    div[data-testid="stMetricValue"],
+    div[data-testid="stMetricValue"] * {
+        color: #17212b !important;
+    }
+
+    div[data-testid="stMetricLabel"],
+    div[data-testid="stMetricLabel"] * {
+        color: #667085 !important;
+    }
+
+    /* Details */
+    div[data-testid="stExpander"] {
+        background: #ffffff !important;
+        border: 1px solid var(--yeti-border) !important;
+        border-radius: 9px !important;
+        overflow: hidden !important;
+    }
+
+    div[data-testid="stExpander"] details,
+    div[data-testid="stExpander"] summary,
+    div[data-testid="stExpander"] * {
+        color: #17212b !important;
+    }
+
+    div[data-testid="stExpander"] summary {
+        background: #ffffff !important;
+    }
+
+    div[data-testid="stExpander"] summary:hover {
+        background: #f3f6f9 !important;
+    }
+
+    div[data-testid="stExpander"] svg {
+        color: #17212b !important;
+        fill: currentColor !important;
+    }
+
+    /* Alerts */
+    div[data-testid="stAlert"] {
+        border-radius: 9px !important;
+    }
+
+    div[data-testid="stAlert"] * {
+        color: #17212b !important;
     }
 
     /* Screenshot */
     div[data-testid="stImage"] {
         max-width: 820px;
-        margin-left: auto;
-        margin-right: auto;
+        margin: 0.4rem auto 1rem auto;
     }
 
     div[data-testid="stImage"] img {
         border: 1px solid var(--yeti-border);
         border-radius: 10px;
-        background: var(--yeti-surface);
+        background: #ffffff;
     }
 
     hr {
         border-color: var(--yeti-border) !important;
+    }
+
+    @media (max-width: 700px) {
+        .block-container {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        .yeti-wordmark {
+            font-size: 1.65rem;
+        }
+
+        .yeti-logo {
+            width: 42px;
+            height: 42px;
+        }
     }
     </style>
     """,
@@ -1224,12 +1235,10 @@ def check_openphish(url):
 
 def check_google_webrisk(url):
     """
-    Check Google's Web Risk live lookup service for phishing /
-    social-engineering reports.
+    Check Google's Web Risk Lookup API.
 
-    A positive result is strong evidence that Google currently
-    considers the URL unsafe. A negative result is NOT a guarantee
-    that the site is genuine.
+    The result keeps a user-readable error so configuration problems
+    such as billing, API restrictions or an invalid key can be fixed.
     """
 
     result = {
@@ -1239,10 +1248,14 @@ def check_google_webrisk(url):
         "checked": False,
         "confirmed": False,
         "threat_types": [],
-        "error": ""
+        "error": "",
+        "status_code": None
     }
 
     if not GOOGLE_WEB_RISK_API_KEY:
+        result["error"] = (
+            "API key is not configured in Streamlit Secrets."
+        )
         return result
 
     try:
@@ -1262,10 +1275,15 @@ def check_google_webrisk(url):
                     GOOGLE_WEB_RISK_API_KEY
                 )
             ],
-            timeout=12,
+            timeout=15,
             headers={
-                "User-Agent": "YetiCheck/1.0"
+                "User-Agent": "YetiCheck/1.0",
+                "Accept": "application/json"
             }
+        )
+
+        result["status_code"] = (
+            response.status_code
         )
 
         if response.status_code == 200:
@@ -1284,10 +1302,39 @@ def check_google_webrisk(url):
                     []
                 )
 
-        else:
-            result["error"] = (
-                f"Google Web Risk returned HTTP {response.status_code}"
+            return result
+
+        # Google normally returns a useful JSON error object.
+        try:
+            error_data = response.json()
+
+            message = (
+                error_data.get(
+                    "error",
+                    {}
+                ).get(
+                    "message"
+                )
             )
+
+            if message:
+                result["error"] = (
+                    message
+                )
+            else:
+                result["error"] = (
+                    f"Google returned HTTP {response.status_code}."
+                )
+
+        except Exception:
+            result["error"] = (
+                f"Google returned HTTP {response.status_code}."
+            )
+
+    except requests.exceptions.Timeout:
+        result["error"] = (
+            "Google Web Risk timed out."
+        )
 
     except Exception as error:
         result["error"] = str(
@@ -1303,8 +1350,7 @@ def check_google_webrisk_chain(
     final_url
 ):
     """
-    Check every important URL in the redirect chain, because a
-    harmless-looking short link may redirect to a known phishing URL.
+    Check the original URL and important redirects.
     """
 
     checked_urls = []
@@ -1314,7 +1360,10 @@ def check_google_webrisk_chain(
         + list(redirects)
         + [final_url]
     ):
-        if item and item not in checked_urls:
+        if (
+            item
+            and item not in checked_urls
+        ):
             checked_urls.append(
                 item
             )
@@ -1327,7 +1376,8 @@ def check_google_webrisk_chain(
         "confirmed": False,
         "matched_url": "",
         "threat_types": [],
-        "error": ""
+        "error": "",
+        "status_code": None
     }
 
     for item in checked_urls:
@@ -1336,16 +1386,26 @@ def check_google_webrisk_chain(
         )
 
         if result.get(
+            "status_code"
+        ) is not None:
+            overall["status_code"] = (
+                result["status_code"]
+            )
+
+        if result.get(
             "checked"
         ):
             overall["checked"] = True
 
-        if result.get(
-            "error"
-        ):
-            overall["error"] = result[
+        if (
+            result.get(
                 "error"
-            ]
+            )
+            and not overall["error"]
+        ):
+            overall["error"] = (
+                result["error"]
+            )
 
         if result.get(
             "confirmed"
@@ -2422,8 +2482,8 @@ line_count = max(
 text_height = min(
     280,
     max(
-        92,
-        65 + line_count * 24
+        76,
+        54 + line_count * 22
     )
 )
 
@@ -2445,23 +2505,6 @@ with col_qr:
 
     pasted_qr_image = None
 
-    if CLIPBOARD_QR_SUPPORT:
-        paste_result = paste_image_button(
-            label="Paste QR code",
-            text_color="#ffffff",
-            background_color="#224867",
-            hover_background_color="#2e5f8a",
-            key=f"paste_qr_{st.session_state['qr_reset_counter']}",
-            errors="ignore"
-        )
-
-        if paste_result is not None:
-            pasted_qr_image = getattr(
-                paste_result,
-                "image_data",
-                None
-            )
-
     qr_file = st.file_uploader(
         "Upload QR image",
         type=[
@@ -2470,7 +2513,8 @@ with col_qr:
             "jpeg",
             "webp"
         ],
-        key="qr_upload"
+        key="qr_upload",
+        help="Upload a screenshot or image containing a QR code."
     )
 
 with col_email:
@@ -2865,8 +2909,15 @@ if submitted:
                 "The website preview could not be loaded."
             )
 
-        c1, c2, c3, c4 = st.columns(
-            4
+        if days_left is None:
+            cert_text = "Unknown"
+        elif days_left < 0:
+            cert_text = "Expired"
+        else:
+            cert_text = f"{days_left} days"
+
+        c1, c2, c3 = st.columns(
+            3
         )
 
         with c1:
@@ -2897,21 +2948,6 @@ if submitted:
                 )
             )
 
-        with c4:
-            if days_left is None:
-                cert_text = "Unknown"
-            elif days_left < 0:
-                cert_text = "Expired"
-            else:
-                cert_text = (
-                    f"{days_left} days"
-                )
-
-            st.metric(
-                "Certificate",
-                cert_text
-            )
-
         google = result.get(
             "google_webrisk",
             {}
@@ -2934,22 +2970,36 @@ if submitted:
             st.error(
                 "Google Web Risk: Reported as phishing / social engineering"
             )
+
         elif google.get(
             "checked"
         ):
             st.success(
                 "Google Web Risk: No current phishing match found"
             )
+
         elif not google.get(
             "configured"
         ):
-            st.info(
-                "Google Web Risk: API key not configured"
+            st.warning(
+                "Google Web Risk is not configured."
             )
+
         else:
-            st.info(
-                "Google Web Risk: Check unavailable"
+            error_message = google.get(
+                "error",
+                ""
             )
+
+            if error_message:
+                st.warning(
+                    "Google Web Risk could not complete the check: "
+                    + error_message
+                )
+            else:
+                st.warning(
+                    "Google Web Risk could not complete the check."
+                )
 
         if result.get(
             "reasons"
@@ -3007,6 +3057,11 @@ if submitted:
             )
 
             st.write(
+                "Certificate expiry:",
+                cert_text
+            )
+
+            st.write(
                 "Google Web Risk:",
                 (
                     "Reported unsafe"
@@ -3014,20 +3069,29 @@ if submitted:
                         "confirmed"
                     )
                     else (
-                        "No match found"
+                        "No current match found"
                         if google.get(
                             "checked"
                         )
                         else (
-                            "API key not configured"
-                            if not google.get(
-                                "configured"
+                            google.get(
+                                "error"
                             )
-                            else "Check unavailable"
+                            or "Check unavailable"
                         )
                     )
                 )
             )
+
+            if google.get(
+                "status_code"
+            ) is not None:
+                st.write(
+                    "Google Web Risk HTTP status:",
+                    google.get(
+                        "status_code"
+                    )
+                )
 
             st.write(
                 "PhishTank:",
