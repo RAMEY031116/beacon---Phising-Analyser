@@ -1267,6 +1267,10 @@ def check_google_webrisk(url):
                     "SOCIAL_ENGINEERING"
                 ),
                 (
+                    "threatTypes",
+                    "MALWARE"
+                ),
+                (
                     "uri",
                     url
                 ),
@@ -2196,8 +2200,35 @@ def analyse_url(url):
     ):
         result["score"] += 90
 
+        threat_types = result[
+            "google_webrisk"
+        ].get(
+            "threat_types",
+            []
+        )
+
+        readable_threats = []
+
+        if "SOCIAL_ENGINEERING" in threat_types:
+            readable_threats.append(
+                "phishing / social engineering"
+            )
+
+        if "MALWARE" in threat_types:
+            readable_threats.append(
+                "malware"
+            )
+
+        threat_text = (
+            " and ".join(
+                readable_threats
+            )
+            if readable_threats
+            else "unsafe activity"
+        )
+
         result["reasons"].append(
-            "Google Web Risk reports this URL as a social-engineering/phishing threat."
+            f"Google Web Risk reports this URL for {threat_text}."
         )
 
     if result["phish_tank"].get(
@@ -2967,15 +2998,43 @@ if submitted:
         if google.get(
             "confirmed"
         ):
+            threat_types = google.get(
+                "threat_types",
+                []
+            )
+
+            if (
+                "SOCIAL_ENGINEERING" in threat_types
+                and "MALWARE" in threat_types
+            ):
+                google_message = (
+                    "Google Web Risk: Reported for phishing / social engineering and malware"
+                )
+
+            elif "SOCIAL_ENGINEERING" in threat_types:
+                google_message = (
+                    "Google Web Risk: Reported for phishing / social engineering"
+                )
+
+            elif "MALWARE" in threat_types:
+                google_message = (
+                    "Google Web Risk: Reported for malware"
+                )
+
+            else:
+                google_message = (
+                    "Google Web Risk: Reported as unsafe"
+                )
+
             st.error(
-                "Google Web Risk: Reported as phishing / social engineering"
+                google_message
             )
 
         elif google.get(
             "checked"
         ):
             st.success(
-                "Google Web Risk: No current phishing match found"
+                "Google Web Risk: No current phishing or malware match found"
             )
 
         elif not google.get(
@@ -3061,26 +3120,52 @@ if submitted:
                 cert_text
             )
 
+            if google.get(
+                "confirmed"
+            ):
+                threat_types = google.get(
+                    "threat_types",
+                    []
+                )
+
+                readable = []
+
+                if "SOCIAL_ENGINEERING" in threat_types:
+                    readable.append(
+                        "Phishing / social engineering"
+                    )
+
+                if "MALWARE" in threat_types:
+                    readable.append(
+                        "Malware"
+                    )
+
+                google_detail = (
+                    ", ".join(
+                        readable
+                    )
+                    if readable
+                    else "Reported unsafe"
+                )
+
+            elif google.get(
+                "checked"
+            ):
+                google_detail = (
+                    "No current phishing or malware match found"
+                )
+
+            else:
+                google_detail = (
+                    google.get(
+                        "error"
+                    )
+                    or "Check unavailable"
+                )
+
             st.write(
                 "Google Web Risk:",
-                (
-                    "Reported unsafe"
-                    if google.get(
-                        "confirmed"
-                    )
-                    else (
-                        "No current match found"
-                        if google.get(
-                            "checked"
-                        )
-                        else (
-                            google.get(
-                                "error"
-                            )
-                            or "Check unavailable"
-                        )
-                    )
-                )
+                google_detail
             )
 
             if google.get(
