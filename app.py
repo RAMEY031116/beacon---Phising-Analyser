@@ -9,6 +9,8 @@ import io
 import base64
 import hashlib
 import sqlite3
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -3014,6 +3016,14 @@ def is_known_auth_service(domain):
 # ------------------------------------------------------------
 
 def analyse_url(url):
+    """
+    Analyse one URL.
+
+    The redirect request must happen first because it determines the final
+    hostname. After that, the independent external checks run concurrently.
+    """
+    analysis_started = time.perf_counter()
+
     result = {
         "url": url,
         "score": 0,
@@ -3034,9 +3044,11 @@ def analyse_url(url):
         "openphish": {},
         "google_webrisk": {},
         "urlscan": {},
-        "local_history": {}
+        "local_history": {},
+        "analysis_seconds": 0.0
     }
 
+    # This stays first because all later checks need the real destination.
     response, final_url, redirects = safe_request(
         url
     )
@@ -3046,16 +3058,13 @@ def analyse_url(url):
 
     if response is not None:
         result["status_code"] = response.status_code
-
         result["site_status"] = classify_http_status(
             response.status_code
         )
-
         result["content_type"] = response.headers.get(
             "Content-Type",
             "Unknown"
         )
-
         result["server"] = response.headers.get(
             "Server",
             "Unknown"
@@ -3075,42 +3084,117 @@ def analyse_url(url):
         hostname
     )
 
-    # Local history is read BEFORE this new scan is saved.
+    # Local SQLite history is fast and does not need a worker.
     result["local_history"] = get_local_history(
         registered_domain
     )
 
-    # Search existing urlscan.io history.
-    # No URL is submitted automatically.
-    result["urlscan"] = check_urlscan_history(
-        hostname
-    )
+    # Run slow, independent checks together.
+    jobs = {}
 
-    if result["urlscan"].get(
-        "malicious_found"
-    ):
-        result["score"] += 30
-
-        result["reasons"].append(
-            "Previous website scans have reported this hostname as malicious."
+    with ThreadPoolExecutor(
+        max_workers=7,
+        thread_name_prefix="yeti"
+    ) as executor:
+        jobs["urlscan"] = executor.submit(
+            check_urlscan_history,
+            hostname
         )
 
-    # Reputation databases
-    result["google_webrisk"] = (
-        check_google_webrisk_chain(
+        jobs["google_webrisk"] = executor.submit(
+            check_google_webrisk_chain,
             url,
             redirects,
             final_url
         )
-    )
 
-    result["phish_tank"] = check_phishtank(
-        final_url
-    )
+        jobs["phish_tank"] = executor.submit(
+            check_phishtank,
+            final_url
+        )
 
-    result["openphish"] = check_openphish(
-        final_url
-    )
+        jobs["openphish"] = executor.submit(
+            check_openphish,
+            final_url
+        )
+
+        jobs["rdap"] = executor.submit(
+            get_rdap_information,
+            registered_domain
+        )
+
+        if final_url.startswith(
+            "https://"
+        ):
+            jobs["tls"] = executor.submit(
+                get_tls_information,
+                hostname
+            )
+
+        jobs["page"] = executor.submit(
+            inspect_page,
+            url
+        )
+
+        # Each helper already handles most errors itself. This fallback makes
+        # one failed service unable to stop the whole Yeti investigation.
+        for name, future in jobs.items():
+            try:
+                result[name] = future.result()
+            except Exception as error:
+                if name == "rdap":
+                    result[name] = {
+                        "registrar": "Unknown",
+                        "created": None,
+                        "age_days": None
+                    }
+                elif name == "tls":
+                    result[name] = {
+                        "valid": False,
+                        "issuer": "Unknown",
+                        "expires": "Unknown"
+                    }
+                elif name == "page":
+                    result[name] = {
+                        "title": "Unknown",
+                        "site_name": "",
+                        "heading": "",
+                        "password_field": False,
+                        "email_field": False,
+                        "forms": [],
+                        "screenshot": None,
+                        "preview_status": "failed",
+                        "preview_message": (
+                            "The website preview could not be loaded."
+                        )
+                    }
+                else:
+                    result[name] = {
+                        "checked": False,
+                        "confirmed": False,
+                        "error": str(error)
+                    }
+
+    if not final_url.startswith(
+        "https://"
+    ):
+        result["tls"] = {
+            "valid": False,
+            "issuer": "Unknown",
+            "expires": "Unknown"
+        }
+
+    # urlscan supporting evidence
+    if result.get(
+        "urlscan",
+        {}
+    ).get(
+        "malicious_found"
+    ):
+        result["score"] += 30
+        result["reasons"].append(
+            "Previous website scans have reported this hostname as malicious."
+        )
 
     if result["google_webrisk"].get(
         "confirmed"
@@ -3166,11 +3250,7 @@ def analyse_url(url):
             "The address appears in the OpenPhish community phishing feed."
         )
 
-    # Domain age
-    result["rdap"] = get_rdap_information(
-        registered_domain
-    )
-
+    # Domain age (RDAP was fetched in parallel)
     age = result["rdap"].get(
         "age_days"
     )
@@ -3197,14 +3277,10 @@ def analyse_url(url):
                 "The domain was registered less than 3 months ago."
             )
 
-    # HTTPS
+    # HTTPS (certificate check was fetched in parallel)
     if final_url.startswith(
         "https://"
     ):
-        result["tls"] = get_tls_information(
-            hostname
-        )
-
         if not result["tls"].get(
             "valid"
         ):
@@ -3270,11 +3346,7 @@ def analyse_url(url):
             "but it is not one of that brand's known official domains."
         )
 
-    # Page
-    result["page"] = inspect_page(
-        url
-    )
-
+    # Page (browser inspection was performed in parallel)
     preview_ok = (
         result["page"].get(
             "preview_status"
@@ -3380,6 +3452,11 @@ def analyse_url(url):
 
     else:
         result["verdict"] = "Low Risk"
+
+    result["analysis_seconds"] = round(
+        time.perf_counter() - analysis_started,
+        2
+    )
 
     save_local_history(
         result
@@ -4882,55 +4959,115 @@ if submitted:
     progress = st.progress(0)
     status = st.empty()
 
+    total_started = time.perf_counter()
+    timing_rows = []
+
     for index, url in enumerate(
         urls,
         start=1
     ):
+        url_started = time.perf_counter()
+
         status.write(
-            f"Checking {index} of {len(urls)}"
+            f"Checking {index} of {len(urls)} — starting..."
         )
 
-        try:
-            result = analyse_url(
+        # Run the analysis in one worker so Streamlit can keep updating
+        # the visible elapsed timer while the checks execute.
+        with ThreadPoolExecutor(
+            max_workers=1
+        ) as ui_executor:
+            future = ui_executor.submit(
+                analyse_url,
                 url
             )
 
-        except Exception as error:
-            result = {
-                "url": url,
-                "final_url": url,
-                "verdict": "Unable to Check",
-                "score": 0,
-                "site_status": "Unable to connect",
-                "status_code": None,
-                "registered_domain": get_registered_domain(
-                    get_hostname(
-                        url
+            while not future.done():
+                elapsed = (
+                    time.perf_counter()
+                    - url_started
+                )
+
+                status.write(
+                    f"Checking {index} of {len(urls)} — "
+                    f"{elapsed:.1f}s elapsed"
+                )
+
+                time.sleep(
+                    0.2
+                )
+
+            try:
+                result = future.result()
+
+            except Exception as error:
+                result = {
+                    "url": url,
+                    "final_url": url,
+                    "verdict": "Unable to Check",
+                    "score": 0,
+                    "site_status": "Unable to connect",
+                    "status_code": None,
+                    "registered_domain": get_registered_domain(
+                        get_hostname(
+                            url
+                        )
+                    ),
+                    "reasons": [
+                        str(
+                            error
+                        )
+                    ],
+                    "rdap": {},
+                    "tls": {},
+                    "page": {},
+                    "phish_tank": {},
+                    "openphish": {},
+                    "google_webrisk": {},
+                    "urlscan": {},
+                    "local_history": {},
+                    "analysis_seconds": round(
+                        time.perf_counter()
+                        - url_started,
+                        2
                     )
-                ),
-                "reasons": [
-                    str(error)
-                ],
-                "rdap": {},
-                "tls": {},
-                "page": {},
-                "phish_tank": {},
-                "openphish": {},
-                "google_webrisk": {},
-                "urlscan": {},
-                "local_history": {}
-            }
+                }
 
         results.append(
             result
+        )
+
+        took = result.get(
+            "analysis_seconds",
+            round(
+                time.perf_counter()
+                - url_started,
+                2
+            )
+        )
+
+        timing_rows.append(
+            took
+        )
+
+        status.write(
+            f"Checked {index} of {len(urls)} — completed in {took:.1f}s"
         )
 
         progress.progress(
             index / len(urls)
         )
 
+    total_elapsed = (
+        time.perf_counter()
+        - total_started
+    )
+
     progress.empty()
-    status.empty()
+
+    status.success(
+        f"Analysis completed in {total_elapsed:.1f}s"
+    )
 
     order = {
         "High Risk": 0,
@@ -5172,6 +5309,15 @@ if submitted:
         st.caption(
             f"Analysis confidence: {confidence_label} — {confidence_message}"
         )
+        elapsed_seconds = result.get(
+            "analysis_seconds"
+        )
+
+        if elapsed_seconds is not None:
+            st.caption(
+                f"Analysis time: {elapsed_seconds:.1f}s"
+            )
+
 
         c1, c2, c3 = st.columns(
             3
