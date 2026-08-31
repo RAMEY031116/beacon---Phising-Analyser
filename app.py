@@ -357,6 +357,17 @@ st.markdown(
             height: 42px;
         }
     }
+
+    /* Keep optional upload area compact */
+    div[data-testid="stExpander"] {
+        margin-top: 0.35rem;
+        margin-bottom: 0.55rem;
+    }
+
+    div[data-testid="stTabs"] button {
+        font-size: 0.88rem !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -2529,39 +2540,45 @@ pasted_text = st.text_area(
     help="For several links, put one link on each line."
 )
 
-col_qr, col_email = st.columns(2)
-
-with col_qr:
-    st.write("QR code")
-
-    pasted_qr_image = None
-
-    qr_file = st.file_uploader(
-        "Upload QR image",
-        type=[
-            "png",
-            "jpg",
-            "jpeg",
-            "webp"
-        ],
-        key="qr_upload",
-        help="Upload a screenshot or image containing a QR code."
+with st.expander(
+    "Optional: QR code or email file"
+):
+    qr_tab, email_tab = st.tabs(
+        [
+            "QR code",
+            "Email file"
+        ]
     )
 
-with col_email:
-    st.write("Email file")
+    with qr_tab:
+        pasted_qr_image = None
 
-    eml_file = st.file_uploader(
-        "Upload .eml email",
-        type=["eml"],
-        key="eml_upload",
-        help=(
-            "Yeti can extract links and review sender, Reply-To, "
-            "SPF, DKIM and DMARC results stored in the email headers."
+        qr_file = st.file_uploader(
+            "Upload QR image",
+            type=[
+                "png",
+                "jpg",
+                "jpeg",
+                "webp"
+            ],
+            key="qr_upload",
+            help="Upload a screenshot or image containing a QR code."
         )
-    )
 
-button_col1, button_col2 = st.columns(2)
+    with email_tab:
+        eml_file = st.file_uploader(
+            "Upload .eml email",
+            type=["eml"],
+            key="eml_upload",
+            help=(
+                "Yeti can extract links and review sender, Reply-To, "
+                "SPF, DKIM and DMARC results stored in the email headers."
+            )
+        )
+
+button_col1, button_col2, button_spacer = st.columns(
+    [1, 1, 2]
+)
 
 with button_col1:
     submitted = st.button(
@@ -2898,6 +2915,17 @@ if submitted:
             "screenshot"
         )
 
+        if days_left is None:
+            cert_text = "Unknown"
+        elif days_left < 0:
+            cert_text = "Expired"
+        else:
+            cert_text = f"{days_left} days"
+
+        # ----------------------------------------------------
+        # Website title
+        # ----------------------------------------------------
+
         st.markdown(
             f"""
             <div class="result-card">
@@ -2910,7 +2938,10 @@ if submitted:
             unsafe_allow_html=True
         )
 
-        # Clear, normal browser-sized screenshot.
+        # ----------------------------------------------------
+        # Screenshot FIRST
+        # ----------------------------------------------------
+
         if (
             screenshot
             and os.path.exists(
@@ -2927,10 +2958,8 @@ if submitted:
             "preview_status"
         ) == "blocked":
             st.info(
-                preview.get(
-                    "preview_message",
-                    "The website blocked the automated preview."
-                )
+                "The website blocked the automated preview. "
+                "This does not mean the website is phishing."
             )
 
         elif preview.get(
@@ -2940,24 +2969,46 @@ if submitted:
                 "The website preview could not be loaded."
             )
 
-        if days_left is None:
-            cert_text = "Unknown"
-        elif days_left < 0:
-            cert_text = "Expired"
+        # ----------------------------------------------------
+        # Overall YETI result at the top
+        # ----------------------------------------------------
+
+        st.markdown(
+            f"""
+            <div class="result-card" style="margin-top:0.4rem;">
+                <div style="font-size:0.78rem; color:#667085; margin-bottom:0.15rem;">
+                    Yeti Risk
+                </div>
+                <div style="font-size:1.75rem; font-weight:750; color:#17212b;">
+                    {result["verdict"]}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # Short human-readable conclusion
+        if result.get(
+            "reasons"
+        ):
+            st.write(
+                result["reasons"][0]
+            )
         else:
-            cert_text = f"{days_left} days"
+            st.write(
+                "No major phishing indicators were found. "
+                "This is not a guarantee that the website is genuine."
+            )
+
+        # ----------------------------------------------------
+        # Only useful supporting facts
+        # ----------------------------------------------------
 
         c1, c2, c3 = st.columns(
             3
         )
 
         with c1:
-            st.metric(
-                "Risk",
-                result["verdict"]
-            )
-
-        with c2:
             st.metric(
                 "Domain age",
                 (
@@ -2967,7 +3018,7 @@ if submitted:
                 )
             )
 
-        with c3:
+        with c2:
             st.metric(
                 "HTTPS",
                 (
@@ -2977,6 +3028,12 @@ if submitted:
                     )
                     else "Not validated"
                 )
+            )
+
+        with c3:
+            st.metric(
+                "Certificate",
+                cert_text
             )
 
         google = result.get(
@@ -2994,83 +3051,9 @@ if submitted:
             {}
         )
 
-        # Reputation is now an important visible part of the result.
-        if google.get(
-            "confirmed"
-        ):
-            threat_types = google.get(
-                "threat_types",
-                []
-            )
-
-            if (
-                "SOCIAL_ENGINEERING" in threat_types
-                and "MALWARE" in threat_types
-            ):
-                google_message = (
-                    "Google Web Risk: Reported for phishing / social engineering and malware"
-                )
-
-            elif "SOCIAL_ENGINEERING" in threat_types:
-                google_message = (
-                    "Google Web Risk: Reported for phishing / social engineering"
-                )
-
-            elif "MALWARE" in threat_types:
-                google_message = (
-                    "Google Web Risk: Reported for malware"
-                )
-
-            else:
-                google_message = (
-                    "Google Web Risk: Reported as unsafe"
-                )
-
-            st.error(
-                google_message
-            )
-
-        elif google.get(
-            "checked"
-        ):
-            st.success(
-                "Google Web Risk: No current phishing or malware match found"
-            )
-
-        elif not google.get(
-            "configured"
-        ):
-            st.warning(
-                "Google Web Risk is not configured."
-            )
-
-        else:
-            error_message = google.get(
-                "error",
-                ""
-            )
-
-            if error_message:
-                st.warning(
-                    "Google Web Risk could not complete the check: "
-                    + error_message
-                )
-            else:
-                st.warning(
-                    "Google Web Risk could not complete the check."
-                )
-
-        if result.get(
-            "reasons"
-        ):
-            st.write(
-                result["reasons"][0]
-            )
-        else:
-            st.write(
-                "No major phishing indicators were found. "
-                "This is not a guarantee that the website is genuine."
-            )
+        # ----------------------------------------------------
+        # Everything technical stays in one place
+        # ----------------------------------------------------
 
         with st.expander(
             "Website details"
@@ -3120,6 +3103,7 @@ if submitted:
                 cert_text
             )
 
+            # Google Web Risk
             if google.get(
                 "confirmed"
             ):
@@ -3140,10 +3124,8 @@ if submitted:
                         "Malware"
                     )
 
-                google_detail = (
-                    ", ".join(
-                        readable
-                    )
+                google_text = (
+                    ", ".join(readable)
                     if readable
                     else "Reported unsafe"
                 )
@@ -3151,12 +3133,12 @@ if submitted:
             elif google.get(
                 "checked"
             ):
-                google_detail = (
+                google_text = (
                     "No current phishing or malware match found"
                 )
 
             else:
-                google_detail = (
+                google_text = (
                     google.get(
                         "error"
                     )
@@ -3165,18 +3147,8 @@ if submitted:
 
             st.write(
                 "Google Web Risk:",
-                google_detail
+                google_text
             )
-
-            if google.get(
-                "status_code"
-            ) is not None:
-                st.write(
-                    "Google Web Risk HTTP status:",
-                    google.get(
-                        "status_code"
-                    )
-                )
 
             st.write(
                 "PhishTank:",
