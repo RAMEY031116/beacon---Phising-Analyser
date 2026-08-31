@@ -1931,12 +1931,19 @@ def render_clickable_preview(
     caption="Website preview"
 ):
     """
-    The card uses a small cropped thumbnail.
-    Clicking ONLY the image opens the original full-page screenshot.
+    Show a compact thumbnail in the Yeti result card.
+
+    Clicking the IMAGE opens a dedicated HTML screenshot viewer.
+    The full-page screenshot fills the browser width and the user
+    scrolls down through the page naturally instead of the browser
+    shrinking the entire long screenshot to fit one screen.
     """
 
-    if not screenshot_path or not os.path.exists(
-        screenshot_path
+    if (
+        not screenshot_path
+        or not os.path.exists(
+            screenshot_path
+        )
     ):
         return
 
@@ -1951,7 +1958,7 @@ def render_clickable_preview(
             "ascii"
         )
 
-        full_data_url = (
+        full_image_data = (
             "data:image/png;base64,"
             + full_encoded
         )
@@ -1972,16 +1979,100 @@ def render_clickable_preview(
                 + thumb_encoded
             )
         else:
-            thumb_data_url = full_data_url
+            thumb_data_url = (
+                full_image_data
+            )
+
+        # Build a simple full-width browser viewer.
+        # This avoids Chrome shrinking a very tall standalone PNG
+        # into a tiny image that fits the whole screen.
+        viewer_html = f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{caption} - Full webpage screenshot</title>
+<style>
+    html, body {{
+        margin: 0;
+        padding: 0;
+        background: #eef1f5;
+        font-family: Arial, sans-serif;
+    }}
+
+    .viewer-header {{
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: #ffffff;
+        border-bottom: 1px solid #d7dee7;
+        padding: 12px 18px;
+        color: #17212b;
+        font-size: 14px;
+        font-weight: 600;
+    }}
+
+    .image-frame {{
+        width: 100%;
+        margin: 0 auto;
+        background: #ffffff;
+    }}
+
+    .image-frame img {{
+        display: block;
+        width: 100%;
+        height: auto;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }}
+</style>
+</head>
+<body>
+    <div class="viewer-header">
+        Full webpage screenshot — scroll down to view the whole page
+    </div>
+
+    <div class="image-frame">
+        <img
+            src="{full_image_data}"
+            alt="{caption}"
+        >
+    </div>
+</body>
+</html>
+"""
+
+        viewer_encoded = base64.b64encode(
+            viewer_html.encode(
+                "utf-8"
+            )
+        ).decode(
+            "ascii"
+        )
+
+        viewer_data_url = (
+            "data:text/html;base64,"
+            + viewer_encoded
+        )
 
         st.markdown(
             f"""
             <div class="preview-wrap">
-                <a href="{full_data_url}" target="_blank" title="Open full-page screenshot">
-                    <img src="{thumb_data_url}" alt="{caption}">
+                <a
+                    href="{viewer_data_url}"
+                    target="_blank"
+                    title="Open full webpage screenshot"
+                >
+                    <img
+                        src="{thumb_data_url}"
+                        alt="{caption}"
+                    >
                 </a>
+
                 <div class="preview-note">
-                    Click image to open the full-page screenshot.
+                    Click image to open the full webpage screenshot.
                 </div>
             </div>
             """,
