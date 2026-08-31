@@ -1,6 +1,6 @@
 streamlit
 requests
 playwright
-python-whois
 tldextract
-pandas
+opencv-python-headless
+numpy
