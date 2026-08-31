@@ -2726,7 +2726,7 @@ def inspect_page(browser_url):
                 try:
                     page.screenshot(
                         path=screenshot_path,
-                        full_page=False
+                        full_page=True
                     )
 
                     if os.path.exists(
