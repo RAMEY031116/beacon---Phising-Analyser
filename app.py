@@ -3264,68 +3264,124 @@ if submitted:
         with st.expander(
             "Website details"
         ):
-            st.markdown(
-                f"""
-                <div style="
-                    display:grid;
-                    grid-template-columns: 160px 1fr;
-                    gap: 0.55rem 0.9rem;
-                    align-items:start;
-                    font-size:0.93rem;
-                    line-height:1.45;
-                ">
-                    <div style="font-weight:650;">Original address</div>
-                    <div style="overflow-wrap:anywhere;">{result["url"]}</div>
+            # Native Streamlit layout instead of raw HTML.
+            # This avoids HTML being displayed as code in dark mode.
 
-                    <div style="font-weight:650;">Final address</div>
-                    <div style="overflow-wrap:anywhere;">{result.get("final_url", result["url"])}</div>
-
-                    <div style="font-weight:650;">HTTP status</div>
-                    <div>{result.get("status_code", "Unknown")}</div>
-
-                    <div style="font-weight:650;">Website status</div>
-                    <div>{result.get("site_status", "Unknown")}</div>
-
-                    <div style="font-weight:650;">Domain age</div>
-                    <div>{f"{age} days" if age is not None else "Unknown"}</div>
-
-                    <div style="font-weight:650;">Registrar</div>
-                    <div>{result.get("rdap", {}).get("registrar", "Unknown")}</div>
-
-                    <div style="font-weight:650;">HTTPS</div>
-                    <div>{"Valid" if tls.get("valid") else "Not validated"}</div>
-
-                    <div style="font-weight:650;">Certificate issuer</div>
-                    <div>{tls.get("issuer", "Unknown")}</div>
-
-                    <div style="font-weight:650;">Certificate expiry</div>
-                    <div>{cert_text}</div>
-
-                    <div style="font-weight:650;">PhishTank</div>
-                    <div>{
+            detail_rows = [
+                (
+                    "Original address",
+                    result["url"]
+                ),
+                (
+                    "Final address",
+                    result.get(
+                        "final_url",
+                        result["url"]
+                    )
+                ),
+                (
+                    "HTTP status",
+                    str(
+                        result.get(
+                            "status_code",
+                            "Unknown"
+                        )
+                    )
+                ),
+                (
+                    "Website status",
+                    result.get(
+                        "site_status",
+                        "Unknown"
+                    )
+                ),
+                (
+                    "Domain age",
+                    (
+                        f"{age} days"
+                        if age is not None
+                        else "Unknown"
+                    )
+                ),
+                (
+                    "Registrar",
+                    result.get(
+                        "rdap",
+                        {}
+                    ).get(
+                        "registrar",
+                        "Unknown"
+                    )
+                ),
+                (
+                    "HTTPS",
+                    (
+                        "Valid"
+                        if tls.get(
+                            "valid"
+                        )
+                        else "Not validated"
+                    )
+                ),
+                (
+                    "Certificate issuer",
+                    tls.get(
+                        "issuer",
+                        "Unknown"
+                    )
+                ),
+                (
+                    "Certificate expiry",
+                    cert_text
+                ),
+                (
+                    "PhishTank",
+                    (
                         "Verified phishing match"
-                        if phishtank.get("confirmed")
+                        if phishtank.get(
+                            "confirmed"
+                        )
                         else (
                             "No verified match"
-                            if phishtank.get("checked")
+                            if phishtank.get(
+                                "checked"
+                            )
                             else "Check unavailable"
                         )
-                    }</div>
-
-                    <div style="font-weight:650;">OpenPhish</div>
-                    <div>{
+                    )
+                ),
+                (
+                    "OpenPhish",
+                    (
                         "Listed in phishing feed"
-                        if openphish.get("confirmed")
+                        if openphish.get(
+                            "confirmed"
+                        )
                         else (
                             "No match found"
-                            if openphish.get("checked")
+                            if openphish.get(
+                                "checked"
+                            )
                             else "Check unavailable"
                         )
-                    }</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+                    )
+                )
+            ]
+
+            for label, value in detail_rows:
+                label_col, value_col = st.columns(
+                    [1, 2.4]
+                )
+
+                with label_col:
+                    st.markdown(
+                        f"**{label}**"
+                    )
+
+                with value_col:
+                    st.write(
+                        value
+                    )
 
             clean_findings = []
 
@@ -3333,17 +3389,26 @@ if submitted:
                 "reasons",
                 []
             ):
-                if "Google Web Risk reports this URL for malware" in finding:
+                if (
+                    "Google Web Risk reports this URL for malware"
+                    in finding
+                ):
                     finding = (
                         "Known malicious URL reported by a live reputation source."
                     )
 
-                elif "Google Web Risk reports this URL for phishing / social engineering" in finding:
+                elif (
+                    "Google Web Risk reports this URL for phishing / social engineering"
+                    in finding
+                ):
                     finding = (
                         "Known phishing or deceptive URL reported by a live reputation source."
                     )
 
-                elif "Google Web Risk reports this URL for phishing / social engineering and malware" in finding:
+                elif (
+                    "Google Web Risk reports this URL for phishing / social engineering and malware"
+                    in finding
+                ):
                     finding = (
                         "Known phishing and malicious URL reported by a live reputation source."
                     )
