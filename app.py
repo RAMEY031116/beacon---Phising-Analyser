@@ -100,28 +100,14 @@ st.markdown(
     }
 
     html, body, .stApp {
-        background: var(--yeti-page) !important;
-        color: var(--yeti-text) !important;
+        background: var(--background-color) !important;
+        color: var(--text-color) !important;
     }
 
     .block-container {
         max-width: 980px;
         padding-top: 1.2rem;
         padding-bottom: 3rem;
-    }
-
-    /* Remove the distracting Streamlit black/coloured top strip */
-    div[data-testid="stDecoration"] {
-        display: none !important;
-    }
-
-    header[data-testid="stHeader"] {
-        background: rgba(246,248,251,0.96) !important;
-        border-bottom: 1px solid #e4e9ef !important;
-    }
-
-    div[data-testid="stToolbar"] {
-        background: transparent !important;
     }
 
     /* Yeti header */
@@ -154,7 +140,7 @@ st.markdown(
         font-size: 2rem;
         font-weight: 750;
         letter-spacing: -0.03em;
-        color: var(--yeti-text) !important;
+        color: var(--text-color) !important;
     }
 
     .yeti-subtitle {
@@ -164,24 +150,12 @@ st.markdown(
         font-size: 0.93rem;
     }
 
-    .stApp p,
-    .stApp span,
-    .stApp label,
-    .stApp h1,
-    .stApp h2,
-    .stApp h3,
-    .stApp h4,
-    .stApp h5,
-    .stApp h6 {
-        color: var(--yeti-text) !important;
-    }
-
     /* Main textarea */
     .stTextArea textarea,
     .stTextInput input {
-        background: #ffffff !important;
-        color: #17212b !important;
-        caret-color: #17212b !important;
+        background: var(--secondary-background-color) !important;
+        color: var(--text-color) !important;
+        caret-color: var(--text-color) !important;
         border: 1px solid #cbd4df !important;
         border-radius: 9px !important;
         box-shadow: none !important;
@@ -201,7 +175,7 @@ st.markdown(
 
     /* Uploaders */
     section[data-testid="stFileUploaderDropzone"] {
-        background: #ffffff !important;
+        background: var(--secondary-background-color) !important;
         border: 1px dashed #bfc9d5 !important;
         border-radius: 9px !important;
         min-height: 105px !important;
@@ -209,7 +183,7 @@ st.markdown(
 
     section[data-testid="stFileUploaderDropzone"] *,
     div[data-testid="stFileUploader"] * {
-        color: #17212b !important;
+        color: var(--text-color) !important;
     }
 
     section[data-testid="stFileUploaderDropzone"] button {
@@ -227,9 +201,9 @@ st.markdown(
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button,
     div[data-testid="stDownloadButton"] button {
-        background: var(--yeti-blue) !important;
+        background: var(--primary-color) !important;
         color: #ffffff !important;
-        border: 1px solid var(--yeti-blue) !important;
+        border: 1px solid var(--primary-color) !important;
         border-radius: 8px !important;
         font-weight: 650 !important;
         min-height: 2.55rem;
@@ -251,7 +225,7 @@ st.markdown(
 
     /* Results */
     .result-card {
-        background: #ffffff !important;
+        background: var(--secondary-background-color) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 10px;
         padding: 0.75rem 0.9rem;
@@ -259,7 +233,7 @@ st.markdown(
     }
 
     .result-card * {
-        color: #17212b !important;
+        color: var(--text-color) !important;
     }
 
     .result-title {
@@ -268,12 +242,12 @@ st.markdown(
     }
 
     .muted {
-        color: #667085 !important;
+        color: color-mix(in srgb, var(--text-color) 65%, transparent) !important;
         font-size: 0.86rem;
     }
 
     div[data-testid="stMetric"] {
-        background: #ffffff !important;
+        background: var(--secondary-background-color) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
         padding: 0.65rem !important;
@@ -282,17 +256,17 @@ st.markdown(
     div[data-testid="stMetric"] *,
     div[data-testid="stMetricValue"],
     div[data-testid="stMetricValue"] * {
-        color: #17212b !important;
+        color: var(--text-color) !important;
     }
 
     div[data-testid="stMetricLabel"],
     div[data-testid="stMetricLabel"] * {
-        color: #667085 !important;
+        color: color-mix(in srgb, var(--text-color) 65%, transparent) !important;
     }
 
     /* Details */
     div[data-testid="stExpander"] {
-        background: #ffffff !important;
+        background: var(--secondary-background-color) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
         overflow: hidden !important;
@@ -301,11 +275,11 @@ st.markdown(
     div[data-testid="stExpander"] details,
     div[data-testid="stExpander"] summary,
     div[data-testid="stExpander"] * {
-        color: #17212b !important;
+        color: var(--text-color) !important;
     }
 
     div[data-testid="stExpander"] summary {
-        background: #ffffff !important;
+        background: var(--secondary-background-color) !important;
     }
 
     div[data-testid="stExpander"] summary:hover {
@@ -313,7 +287,7 @@ st.markdown(
     }
 
     div[data-testid="stExpander"] svg {
-        color: #17212b !important;
+        color: var(--text-color) !important;
         fill: currentColor !important;
     }
 
@@ -323,7 +297,7 @@ st.markdown(
     }
 
     div[data-testid="stAlert"] * {
-        color: #17212b !important;
+        color: var(--text-color) !important;
     }
 
     /* Screenshot */
@@ -335,7 +309,7 @@ st.markdown(
     div[data-testid="stImage"] img {
         border: 1px solid var(--yeti-border);
         border-radius: 10px;
-        background: #ffffff;
+        background: var(--secondary-background-color);
     }
 
     hr {
@@ -442,6 +416,14 @@ st.markdown(
 
         .risk-banner-verdict {
             font-size: 1.2rem;
+        }
+    }
+
+
+    @media (max-width: 650px) {
+        div[data-testid="stExpander"] div[style*="grid-template-columns: 160px 1fr"] {
+            grid-template-columns: 1fr !important;
+            gap: 0.25rem !important;
         }
     }
 
@@ -3065,13 +3047,32 @@ if submitted:
                 "The website preview could not be loaded."
             )
 
-        # Short human-readable conclusion
+        # Short human-readable conclusion.
+        # Keep provider/database names out of the main result.
         if result.get(
             "reasons"
         ):
+            main_reason = result["reasons"][0]
+
+            if "Google Web Risk reports this URL for malware" in main_reason:
+                main_reason = (
+                    "This website has been identified as a known malicious URL."
+                )
+
+            elif "Google Web Risk reports this URL for phishing / social engineering" in main_reason:
+                main_reason = (
+                    "This website has been identified as a known phishing or deceptive URL."
+                )
+
+            elif "Google Web Risk reports this URL for phishing / social engineering and malware" in main_reason:
+                main_reason = (
+                    "This website has been identified as a known phishing and malicious URL."
+                )
+
             st.write(
-                result["reasons"][0]
+                main_reason
             )
+
         else:
             st.write(
                 "No major phishing indicators were found. "
@@ -3136,142 +3137,100 @@ if submitted:
         with st.expander(
             "Website details"
         ):
-            st.write(
-                "Original address:",
-                result["url"]
-            )
+            st.markdown(
+                f"""
+                <div style="
+                    display:grid;
+                    grid-template-columns: 160px 1fr;
+                    gap: 0.55rem 0.9rem;
+                    align-items:start;
+                    font-size:0.93rem;
+                    line-height:1.45;
+                ">
+                    <div style="font-weight:650;">Original address</div>
+                    <div style="overflow-wrap:anywhere;">{result["url"]}</div>
 
-            st.write(
-                "Final address:",
-                result.get(
-                    "final_url",
-                    result["url"]
-                )
-            )
+                    <div style="font-weight:650;">Final address</div>
+                    <div style="overflow-wrap:anywhere;">{result.get("final_url", result["url"])}</div>
 
-            st.write(
-                "HTTP status:",
-                result.get(
-                    "status_code",
-                    "Unknown"
-                )
-            )
+                    <div style="font-weight:650;">HTTP status</div>
+                    <div>{result.get("status_code", "Unknown")}</div>
 
-            st.write(
-                "Registrar:",
-                result.get(
-                    "rdap",
-                    {}
-                ).get(
-                    "registrar",
-                    "Unknown"
-                )
-            )
+                    <div style="font-weight:650;">Website status</div>
+                    <div>{result.get("site_status", "Unknown")}</div>
 
-            st.write(
-                "Certificate issuer:",
-                tls.get(
-                    "issuer",
-                    "Unknown"
-                )
-            )
+                    <div style="font-weight:650;">Domain age</div>
+                    <div>{f"{age} days" if age is not None else "Unknown"}</div>
 
-            st.write(
-                "Certificate expiry:",
-                cert_text
-            )
+                    <div style="font-weight:650;">Registrar</div>
+                    <div>{result.get("rdap", {}).get("registrar", "Unknown")}</div>
 
-            # Google Web Risk
-            if google.get(
-                "confirmed"
-            ):
-                threat_types = google.get(
-                    "threat_types",
-                    []
-                )
+                    <div style="font-weight:650;">HTTPS</div>
+                    <div>{"Valid" if tls.get("valid") else "Not validated"}</div>
 
-                readable = []
+                    <div style="font-weight:650;">Certificate issuer</div>
+                    <div>{tls.get("issuer", "Unknown")}</div>
 
-                if "SOCIAL_ENGINEERING" in threat_types:
-                    readable.append(
-                        "Phishing / social engineering"
-                    )
+                    <div style="font-weight:650;">Certificate expiry</div>
+                    <div>{cert_text}</div>
 
-                if "MALWARE" in threat_types:
-                    readable.append(
-                        "Malware"
-                    )
-
-                google_text = (
-                    ", ".join(readable)
-                    if readable
-                    else "Reported unsafe"
-                )
-
-            elif google.get(
-                "checked"
-            ):
-                google_text = (
-                    "No current phishing or malware match found"
-                )
-
-            else:
-                google_text = (
-                    google.get(
-                        "error"
-                    )
-                    or "Check unavailable"
-                )
-
-            st.write(
-                "Google Web Risk:",
-                google_text
-            )
-
-            st.write(
-                "PhishTank:",
-                (
-                    "Verified phishing match"
-                    if phishtank.get(
-                        "confirmed"
-                    )
-                    else (
-                        "No verified match"
-                        if phishtank.get(
-                            "checked"
+                    <div style="font-weight:650;">PhishTank</div>
+                    <div>{
+                        "Verified phishing match"
+                        if phishtank.get("confirmed")
+                        else (
+                            "No verified match"
+                            if phishtank.get("checked")
+                            else "Check unavailable"
                         )
-                        else "Check unavailable"
-                    )
-                )
-            )
+                    }</div>
 
-            st.write(
-                "OpenPhish:",
-                (
-                    "Listed in community feed"
-                    if openphish.get(
-                        "confirmed"
-                    )
-                    else (
-                        "No match found"
-                        if openphish.get(
-                            "checked"
+                    <div style="font-weight:650;">OpenPhish</div>
+                    <div>{
+                        "Listed in phishing feed"
+                        if openphish.get("confirmed")
+                        else (
+                            "No match found"
+                            if openphish.get("checked")
+                            else "Check unavailable"
                         )
-                        else "Check unavailable"
-                    )
-                )
+                    }</div>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
-            if result.get(
-                "reasons"
+            clean_findings = []
+
+            for finding in result.get(
+                "reasons",
+                []
             ):
-                st.write(
-                    "Findings:"
+                if "Google Web Risk reports this URL for malware" in finding:
+                    finding = (
+                        "Known malicious URL reported by a live reputation source."
+                    )
+
+                elif "Google Web Risk reports this URL for phishing / social engineering" in finding:
+                    finding = (
+                        "Known phishing or deceptive URL reported by a live reputation source."
+                    )
+
+                elif "Google Web Risk reports this URL for phishing / social engineering and malware" in finding:
+                    finding = (
+                        "Known phishing and malicious URL reported by a live reputation source."
+                    )
+
+                clean_findings.append(
+                    finding
                 )
 
-                for finding in result[
-                    "reasons"
-                ][:8]:
+            if clean_findings:
+                st.markdown(
+                    "**Findings**"
+                )
+
+                for finding in clean_findings[:8]:
                     st.write(
                         finding
                     )
