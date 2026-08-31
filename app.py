@@ -8,6 +8,7 @@ import re
 import io
 import base64
 import hashlib
+import sqlite3
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -89,6 +90,13 @@ GOOGLE_WEB_RISK_API_KEY = get_secret(
 PHISHTANK_APP_KEY = get_secret(
     "PHISHTANK_APP_KEY"
 )
+
+
+URLSCAN_API_KEY = get_secret(
+    "URLSCAN_API_KEY"
+)
+
+HISTORY_DB_PATH = "yeti_history.db"
 
 
 # ------------------------------------------------------------
@@ -608,6 +616,198 @@ SHORTENERS = {
     "bit.ly", "tinyurl.com", "t.co", "cutt.ly", "rb.gy",
     "is.gd", "buff.ly", "ow.ly", "rebrand.ly", "shorturl.at"
 }
+
+
+
+# ------------------------------------------------------------
+# LOCAL YETI HISTORY
+# ------------------------------------------------------------
+
+def privacy_safe_url(url):
+    """
+    Remove query strings and fragments before writing a URL
+    into Yeti's local history database.
+    """
+
+    try:
+        parsed = urlparse(
+            url
+        )
+
+        return parsed._replace(
+            query="",
+            fragment=""
+        ).geturl()
+
+    except Exception:
+        return url
+
+
+def initialise_history_database():
+    try:
+        connection = sqlite3.connect(
+            HISTORY_DB_PATH,
+            timeout=5
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                checked_at TEXT NOT NULL,
+                domain TEXT,
+                original_url TEXT,
+                final_url TEXT,
+                verdict TEXT,
+                score INTEGER,
+                status_code INTEGER
+            )
+            """
+        )
+
+        connection.commit()
+        connection.close()
+
+    except Exception:
+        pass
+
+
+def get_local_history(domain):
+    result = {
+        "available": False,
+        "scan_count": 0,
+        "first_seen": None,
+        "last_seen": None,
+        "highest_score": None,
+        "highest_verdict": None,
+        "last_verdict": None
+    }
+
+    if not domain:
+        return result
+
+    try:
+        initialise_history_database()
+
+        connection = sqlite3.connect(
+            HISTORY_DB_PATH,
+            timeout=5
+        )
+
+        rows = connection.execute(
+            """
+            SELECT
+                checked_at,
+                verdict,
+                score
+            FROM scans
+            WHERE domain = ?
+            ORDER BY checked_at ASC
+            """,
+            (
+                domain,
+            )
+        ).fetchall()
+
+        connection.close()
+
+        result["available"] = True
+        result["scan_count"] = len(
+            rows
+        )
+
+        if rows:
+            result["first_seen"] = rows[0][0]
+            result["last_seen"] = rows[-1][0]
+            result["last_verdict"] = rows[-1][1]
+
+            highest = max(
+                rows,
+                key=lambda row: (
+                    row[2]
+                    if row[2] is not None
+                    else -1
+                )
+            )
+
+            result["highest_score"] = highest[2]
+            result["highest_verdict"] = highest[1]
+
+    except Exception:
+        pass
+
+    return result
+
+
+def save_local_history(result):
+    domain = result.get(
+        "registered_domain",
+        ""
+    )
+
+    if not domain:
+        return
+
+    try:
+        initialise_history_database()
+
+        connection = sqlite3.connect(
+            HISTORY_DB_PATH,
+            timeout=5
+        )
+
+        connection.execute(
+            """
+            INSERT INTO scans (
+                checked_at,
+                domain,
+                original_url,
+                final_url,
+                verdict,
+                score,
+                status_code
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                datetime.now(
+                    timezone.utc
+                ).isoformat(),
+                domain,
+                privacy_safe_url(
+                    result.get(
+                        "url",
+                        ""
+                    )
+                ),
+                privacy_safe_url(
+                    result.get(
+                        "final_url",
+                        ""
+                    )
+                ),
+                result.get(
+                    "verdict",
+                    ""
+                ),
+                int(
+                    result.get(
+                        "score",
+                        0
+                    )
+                    or 0
+                ),
+                result.get(
+                    "status_code"
+                )
+            )
+        )
+
+        connection.commit()
+        connection.close()
+
+    except Exception:
+        pass
 
 
 # ------------------------------------------------------------
@@ -1336,6 +1536,315 @@ def certificate_days_left(expiry_text):
 
     except Exception:
         return None
+
+
+
+# ------------------------------------------------------------
+# URLSCAN.IO HISTORICAL SEARCH
+# ------------------------------------------------------------
+
+def parse_urlscan_date(value):
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(
+            str(value).replace(
+                "Z",
+                "+00:00"
+            )
+        )
+    except Exception:
+        return None
+
+
+def check_urlscan_history(hostname):
+    """
+    Search EXISTING urlscan.io scans for this exact hostname.
+
+    Yeti does not automatically submit the user's URL to urlscan.
+    This keeps work URLs from being published by accident.
+    """
+
+    result = {
+        "configured": bool(
+            URLSCAN_API_KEY
+        ),
+        "checked": False,
+        "error": "",
+        "total": 0,
+        "recent_count": 0,
+        "last_seen": None,
+        "malicious_found": False,
+        "malicious_count": 0,
+        "highest_score": None,
+        "categories": [],
+        "brands": [],
+        "latest_title": "",
+        "latest_ip": "",
+        "latest_country": ""
+    }
+
+    if not URLSCAN_API_KEY:
+        return result
+
+    if not hostname:
+        return result
+
+    # Hostnames contain only a small safe character set after URL parsing.
+    safe_hostname = re.sub(
+        r"[^A-Za-z0-9._-]",
+        "",
+        hostname
+    )
+
+    if not safe_hostname:
+        return result
+
+    try:
+        response = requests.get(
+            "https://urlscan.io/api/v1/search/",
+            params={
+                "q": (
+                    f'page.domain.keyword:"{safe_hostname}" '
+                    'AND date:>now-90d'
+                ),
+                "size": 10
+            },
+            headers={
+                "api-key": URLSCAN_API_KEY,
+                "User-Agent": "YetiCheck/1.0",
+                "Accept": "application/json"
+            },
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            try:
+                data = response.json()
+                message = (
+                    data.get(
+                        "message"
+                    )
+                    or data.get(
+                        "error"
+                    )
+                )
+
+                if isinstance(
+                    message,
+                    dict
+                ):
+                    message = message.get(
+                        "message"
+                    )
+
+                result["error"] = (
+                    str(message)
+                    if message
+                    else f"HTTP {response.status_code}"
+                )
+
+            except Exception:
+                result["error"] = (
+                    f"HTTP {response.status_code}"
+                )
+
+            return result
+
+        data = response.json()
+
+        results = data.get(
+            "results",
+            []
+        )
+
+        result["checked"] = True
+        result["total"] = int(
+            data.get(
+                "total",
+                len(results)
+            )
+            or 0
+        )
+        result["recent_count"] = len(
+            results
+        )
+
+        highest_score = None
+        categories = set()
+        brands = set()
+        malicious_count = 0
+
+        for index, scan in enumerate(
+            results
+        ):
+            task = scan.get(
+                "task",
+                {}
+            )
+            page = scan.get(
+                "page",
+                {}
+            )
+            verdicts = scan.get(
+                "verdicts",
+                {}
+            )
+
+            if index == 0:
+                result["last_seen"] = (
+                    task.get(
+                        "time"
+                    )
+                    or scan.get(
+                        "_source",
+                        {}
+                    ).get(
+                        "task",
+                        {}
+                    ).get(
+                        "time"
+                    )
+                )
+
+                result["latest_title"] = (
+                    page.get(
+                        "title"
+                    )
+                    or ""
+                )
+
+                result["latest_ip"] = (
+                    page.get(
+                        "ip"
+                    )
+                    or ""
+                )
+
+                result["latest_country"] = (
+                    page.get(
+                        "country"
+                    )
+                    or ""
+                )
+
+            malicious = bool(
+                verdicts.get(
+                    "malicious",
+                    False
+                )
+            )
+
+            urlscan_verdict = verdicts.get(
+                "urlscan",
+                {}
+            )
+
+            if isinstance(
+                urlscan_verdict,
+                dict
+            ):
+                malicious = (
+                    malicious
+                    or bool(
+                        urlscan_verdict.get(
+                            "malicious",
+                            False
+                        )
+                    )
+                )
+
+                score = urlscan_verdict.get(
+                    "score"
+                )
+
+                if isinstance(
+                    score,
+                    (int, float)
+                ):
+                    if (
+                        highest_score is None
+                        or score > highest_score
+                    ):
+                        highest_score = score
+
+                for category in urlscan_verdict.get(
+                    "categories",
+                    []
+                ) or []:
+                    categories.add(
+                        str(category)
+                    )
+
+                for brand in urlscan_verdict.get(
+                    "brands",
+                    []
+                ) or []:
+                    if isinstance(
+                        brand,
+                        dict
+                    ):
+                        brand_name = (
+                            brand.get(
+                                "name"
+                            )
+                            or brand.get(
+                                "key"
+                            )
+                        )
+
+                        if brand_name:
+                            brands.add(
+                                str(
+                                    brand_name
+                                )
+                            )
+
+            general_score = verdicts.get(
+                "score"
+            )
+
+            if isinstance(
+                general_score,
+                (int, float)
+            ):
+                if (
+                    highest_score is None
+                    or general_score > highest_score
+                ):
+                    highest_score = general_score
+
+            if malicious:
+                malicious_count += 1
+
+        result["malicious_count"] = (
+            malicious_count
+        )
+        result["malicious_found"] = (
+            malicious_count > 0
+        )
+        result["highest_score"] = (
+            highest_score
+        )
+        result["categories"] = sorted(
+            categories
+        )
+        result["brands"] = sorted(
+            brands
+        )
+
+    except requests.exceptions.Timeout:
+        result["error"] = (
+            "urlscan.io timed out."
+        )
+
+    except Exception as error:
+        result["error"] = str(
+            error
+        )
+
+    return result
 
 
 # ------------------------------------------------------------
@@ -2299,7 +2808,9 @@ def analyse_url(url):
         "page": {},
         "phish_tank": {},
         "openphish": {},
-        "google_webrisk": {}
+        "google_webrisk": {},
+        "urlscan": {},
+        "local_history": {}
     }
 
     response, final_url, redirects = safe_request(
@@ -2339,6 +2850,26 @@ def analyse_url(url):
     result["ip_addresses"] = resolve_ip(
         hostname
     )
+
+    # Local history is read BEFORE this new scan is saved.
+    result["local_history"] = get_local_history(
+        registered_domain
+    )
+
+    # Search existing urlscan.io history.
+    # No URL is submitted automatically.
+    result["urlscan"] = check_urlscan_history(
+        hostname
+    )
+
+    if result["urlscan"].get(
+        "malicious_found"
+    ):
+        result["score"] += 30
+
+        result["reasons"].append(
+            "Previous website scans have reported this hostname as malicious."
+        )
 
     # Reputation databases
     result["google_webrisk"] = (
@@ -2625,6 +3156,10 @@ def analyse_url(url):
 
     else:
         result["verdict"] = "Low Risk"
+
+    save_local_history(
+        result
+    )
 
     return result
 
@@ -2941,7 +3476,9 @@ if submitted:
                 "page": {},
                 "phish_tank": {},
                 "openphish": {},
-                "google_webrisk": {}
+                "google_webrisk": {},
+                "urlscan": {},
+                "local_history": {}
             }
 
         results.append(
@@ -3368,6 +3905,85 @@ if submitted:
                 )
             ]
 
+            urlscan = result.get(
+                "urlscan",
+                {}
+            )
+
+            local_history = result.get(
+                "local_history",
+                {}
+            )
+
+            if urlscan.get(
+                "configured"
+            ):
+                if urlscan.get(
+                    "checked"
+                ):
+                    if urlscan.get(
+                        "malicious_found"
+                    ):
+                        urlscan_text = (
+                            f"{urlscan.get('malicious_count', 0)} recent scan(s) "
+                            "reported malicious"
+                        )
+                    elif urlscan.get(
+                        "recent_count",
+                        0
+                    ) > 0:
+                        urlscan_text = (
+                            f"{urlscan.get('recent_count', 0)} recent scan(s), "
+                            "no malicious verdict found"
+                        )
+                    else:
+                        urlscan_text = (
+                            "No recent scans found"
+                        )
+                else:
+                    urlscan_text = (
+                        urlscan.get(
+                            "error"
+                        )
+                        or "Check unavailable"
+                    )
+
+                detail_rows.append(
+                    (
+                        "urlscan.io history",
+                        urlscan_text
+                    )
+                )
+            else:
+                detail_rows.append(
+                    (
+                        "urlscan.io history",
+                        "API key not configured"
+                    )
+                )
+
+            previous_count = local_history.get(
+                "scan_count",
+                0
+            )
+
+            if previous_count > 0:
+                history_text = (
+                    f"Previously checked {previous_count} time(s); "
+                    f"last verdict: {local_history.get('last_verdict', 'Unknown')}"
+                )
+            else:
+                history_text = (
+                    "First time Yeti has seen this domain"
+                )
+
+            detail_rows.append(
+                (
+                    "Yeti history",
+                    history_text
+                )
+            )
+
             for label, value in detail_rows:
                 label_col, value_col = st.columns(
                     [1, 2.4]
@@ -3426,5 +4042,164 @@ if submitted:
                     st.write(
                         finding
                     )
+
+
+        history = result.get(
+            "local_history",
+            {}
+        )
+
+        urlscan = result.get(
+            "urlscan",
+            {}
+        )
+
+        if (
+            history.get(
+                "scan_count",
+                0
+            ) > 0
+            or urlscan.get(
+                "recent_count",
+                0
+            ) > 0
+        ):
+            with st.expander(
+                "Previous activity"
+            ):
+                if history.get(
+                    "scan_count",
+                    0
+                ) > 0:
+                    st.write(
+                        "Yeti previously checked this domain:",
+                        history.get(
+                            "scan_count",
+                            0
+                        ),
+                        "time(s)"
+                    )
+
+                    st.write(
+                        "First checked by Yeti:",
+                        history.get(
+                            "first_seen",
+                            "Unknown"
+                        )
+                    )
+
+                    st.write(
+                        "Last checked by Yeti:",
+                        history.get(
+                            "last_seen",
+                            "Unknown"
+                        )
+                    )
+
+                    st.write(
+                        "Previous verdict:",
+                        history.get(
+                            "last_verdict",
+                            "Unknown"
+                        )
+                    )
+
+                    if history.get(
+                        "highest_verdict"
+                    ):
+                        st.write(
+                            "Highest previous verdict:",
+                            history.get(
+                                "highest_verdict"
+                            )
+                        )
+
+                if urlscan.get(
+                    "checked"
+                ):
+                    st.write(
+                        "urlscan.io recent scans found:",
+                        urlscan.get(
+                            "recent_count",
+                            0
+                        )
+                    )
+
+                    if urlscan.get(
+                        "last_seen"
+                    ):
+                        st.write(
+                            "Most recent urlscan observation:",
+                            urlscan.get(
+                                "last_seen"
+                            )
+                        )
+
+                    if urlscan.get(
+                        "malicious_found"
+                    ):
+                        st.write(
+                            "Recent malicious urlscan verdicts:",
+                            urlscan.get(
+                                "malicious_count",
+                                0
+                            )
+                        )
+
+                    if urlscan.get(
+                        "categories"
+                    ):
+                        st.write(
+                            "urlscan categories:",
+                            ", ".join(
+                                urlscan.get(
+                                    "categories",
+                                    []
+                                )
+                            )
+                        )
+
+                    if urlscan.get(
+                        "brands"
+                    ):
+                        st.write(
+                            "Brands detected by urlscan:",
+                            ", ".join(
+                                urlscan.get(
+                                    "brands",
+                                    []
+                                )
+                            )
+                        )
+
+                    if urlscan.get(
+                        "latest_title"
+                    ):
+                        st.write(
+                            "Latest scanned page title:",
+                            urlscan.get(
+                                "latest_title"
+                            )
+                        )
+
+                    if urlscan.get(
+                        "latest_ip"
+                    ):
+                        st.write(
+                            "Latest scanned IP:",
+                            urlscan.get(
+                                "latest_ip"
+                            )
+                        )
+
+                    if urlscan.get(
+                        "latest_country"
+                    ):
+                        st.write(
+                            "Latest scanned country:",
+                            urlscan.get(
+                                "latest_country"
+                            )
+                        )
 
         st.divider()
