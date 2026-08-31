@@ -26,11 +26,9 @@ st.set_page_config(
 # ------------------------------------------------------------
 # OPTIONAL REPUTATION CHECK
 # ------------------------------------------------------------
-# PhishTank is a public phishing database.
+#  is a public phishing database.
 # Set this to False if you do not want scanned URLs sent there.
 
-USE_PHISHTANK = True
-PHISHTANK_APP_KEY = os.getenv("PHISHTANK_APP_KEY", "").strip()
 
 
 # ------------------------------------------------------------
@@ -552,56 +550,6 @@ def get_rdap_information(domain):
     return result
 
 
-def check_phishtank(url):
-    result = {
-        "checked": False,
-        "listed": False,
-        "verified": False,
-        "valid": False
-    }
-
-    if not USE_PHISHTANK:
-        return result
-
-    try:
-        data = {
-            "url": url,
-            "format": "json"
-        }
-
-        if PHISHTANK_APP_KEY:
-            data["app_key"] = PHISHTANK_APP_KEY
-
-        response = requests.post(
-            "https://checkurl.phishtank.com/checkurl/",
-            data=data,
-            timeout=12,
-            headers={"User-Agent": "YetiCheck/1.0"}
-        )
-
-        if response.status_code != 200:
-            return result
-
-        payload = response.json()
-        details = payload.get("results", {})
-
-        result["checked"] = True
-
-        def yes(value):
-            return str(value).lower() in (
-                "true", "yes", "y", "1"
-            )
-
-        result["listed"] = yes(details.get("in_database", False))
-        result["verified"] = yes(details.get("verified", False))
-        result["valid"] = yes(details.get("valid", False))
-
-    except Exception:
-        pass
-
-    return result
-
-
 def detect_claimed_brand(hostname, registered_domain, page):
     """
     Only use strong identity signals.
@@ -697,6 +645,181 @@ def detect_lookalike_domain(registered_domain):
                 return brand
 
     return None
+
+
+
+def normalise_lookalike_text(value):
+    value = value.lower()
+
+    replacements = {
+        "0": "o",
+        "1": "l",
+        "3": "e",
+        "4": "a",
+        "5": "s",
+        "7": "t"
+    }
+
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+
+    return value
+
+
+def detect_stronger_lookalike(registered_domain):
+    extracted = tldextract.extract(registered_domain)
+    domain_name = extracted.domain.lower()
+
+    if not domain_name:
+        return None
+
+    normalised = normalise_lookalike_text(domain_name)
+
+    for brand in KNOWN_BRANDS:
+
+        if is_official_brand_domain(
+            brand,
+            registered_domain
+        ):
+            continue
+
+        normal_brand = normalise_lookalike_text(
+            brand
+        )
+
+        if normalised == normal_brand:
+            return brand
+
+        if len(brand) >= 5:
+            distance = simple_edit_distance(
+                normalised,
+                normal_brand
+            )
+
+            if distance == 1:
+                return brand
+
+    return None
+
+
+def get_url_structure_findings(url):
+    findings = []
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+
+    if parsed.username or parsed.password:
+        findings.append((
+            20,
+            "The URL contains username or password information before the hostname."
+        ))
+
+    if (
+        hostname.startswith("xn--")
+        or ".xn--" in hostname
+    ):
+        findings.append((
+            22,
+            "The domain uses punycode, which can be used for lookalike domain names."
+        ))
+
+    try:
+        ip_address(hostname)
+
+        findings.append((
+            20,
+            "The website uses an IP address instead of a normal domain name."
+        ))
+
+    except ValueError:
+        pass
+
+    extracted = tldextract.extract(
+        hostname
+    )
+
+    if extracted.subdomain:
+        parts = [
+            part
+            for part in extracted.subdomain.split(".")
+            if part
+        ]
+
+        if len(parts) >= 4:
+            findings.append((
+                7,
+                "The address uses an unusually deep subdomain structure."
+            ))
+
+    try:
+        port = parsed.port
+
+        if port and port not in (80, 443):
+            findings.append((
+                5,
+                f"The website uses the non-standard port {port}."
+            ))
+
+    except ValueError:
+        pass
+
+    if url.count("%") >= 5:
+        findings.append((
+            5,
+            "The URL contains a large amount of encoded text."
+        ))
+
+    if len(url) > 220:
+        findings.append((
+            4,
+            "The URL is unusually long."
+        ))
+
+    return findings
+
+
+def count_registered_domain_changes(
+    original_url,
+    redirects,
+    final_url
+):
+    urls = (
+        [original_url]
+        + list(redirects)
+        + [final_url]
+    )
+
+    domains = []
+
+    for item in urls:
+        domain = get_registered_domain(
+            get_hostname(item)
+        )
+
+        if domain and (
+            not domains
+            or domain != domains[-1]
+        ):
+            domains.append(domain)
+
+    if len(domains) <= 1:
+        return 0, domains
+
+    return len(domains) - 1, domains
+
+
+def is_known_auth_service(domain):
+    known_services = {
+        "microsoftonline.com",
+        "live.com",
+        "google.com",
+        "okta.com",
+        "auth0.com",
+        "stripe.com",
+        "paypal.com"
+    }
+
+    return domain.lower() in known_services
 
 
 def get_browser_path():
@@ -944,202 +1067,293 @@ def analyse_url(url):
         "rdap": {},
         "tls": {},
         "page": {},
-        "phishing_database": {},
         "brand": None,
-        "lookalike_brand": None
+        "lookalike_brand": None,
+        "redirect_domains": []
     }
 
-    response, final_url, redirects = safe_request(url)
+    # 1. Follow the address and redirects safely.
+    response, final_url, redirects = safe_request(
+        url
+    )
 
     result["final_url"] = final_url
     result["redirects"] = redirects
 
-    hostname = get_hostname(final_url)
-    registered_domain = get_registered_domain(hostname)
+    hostname = get_hostname(
+        final_url
+    )
+
+    registered_domain = get_registered_domain(
+        hostname
+    )
 
     result["hostname"] = hostname
-    result["registered_domain"] = registered_domain
-    result["ip_addresses"] = resolve_ip(hostname)
+    result["registered_domain"] = (
+        registered_domain
+    )
 
-    # Reputation check. A positive match is strong evidence.
-    # No match does not mean the website is safe.
-    result["phishing_database"] = check_phishtank(final_url)
-    phishing = result["phishing_database"]
+    result["ip_addresses"] = resolve_ip(
+        hostname
+    )
 
-    if (
-        phishing.get("listed")
-        and phishing.get("verified")
-        and phishing.get("valid")
-    ):
-        result["score"] += 70
-        result["reasons"].append(
-            "This address is listed as a verified phishing page in PhishTank."
-        )
 
-    # Registration age. New domains are only supporting evidence.
-    result["rdap"] = get_rdap_information(registered_domain)
-    age = result["rdap"].get("age_days")
+    # 2. Check domain registration age.
+    result["rdap"] = get_rdap_information(
+        registered_domain
+    )
+
+    age = result["rdap"].get(
+        "age_days"
+    )
 
     if age is not None:
-        if age < 14:
-            result["score"] += 25
+
+        if age < 7:
+            result["score"] += 20
+
             result["reasons"].append(
-                "The domain was registered less than 14 days ago."
+                "The domain was registered less than 7 days ago."
             )
+
         elif age < 30:
-            result["score"] += 18
+            result["score"] += 12
+
             result["reasons"].append(
                 "The domain was registered less than 30 days ago."
             )
-        elif age < 180:
-            result["score"] += 6
+
+        elif age < 90:
+            result["score"] += 5
+
             result["reasons"].append(
-                "The domain was registered less than 6 months ago."
+                "The domain was registered less than 3 months ago."
             )
 
-    # HTTPS certificate.
-    if final_url.startswith("https://"):
-        result["tls"] = get_tls_information(hostname)
+
+    # 3. Check HTTPS and certificate validity.
+    if final_url.startswith(
+        "https://"
+    ):
+
+        result["tls"] = get_tls_information(
+            hostname
+        )
+
+        if not result["tls"].get(
+            "valid"
+        ):
+            result["score"] += 18
+
+            result["reasons"].append(
+                "Yeti Check could not validate the HTTPS certificate."
+            )
+
     else:
+
         result["tls"] = {
             "enabled": False,
             "valid": False,
             "issuer": "Unknown",
             "expires": "Unknown"
         }
-        result["score"] += 12
+
+        result["score"] += 15
+
         result["reasons"].append(
             "The final page is not using HTTPS."
         )
 
-    # Inspect the page.
-    result["page"] = inspect_page(url)
 
-    # Strong brand identity check.
-    # Do not analyse an Access Denied / bot-block page as the real website.
-    if result["page"].get("preview_status") == "success":
-        brand = detect_claimed_brand(
-            hostname,
-            registered_domain,
-            result["page"]
+    # 4. Check the shape of the URL.
+    for points, reason in (
+        get_url_structure_findings(
+            final_url
         )
-    else:
-        brand = None
-
-    result["brand"] = brand
-
-    if brand and not is_official_brand_domain(brand, registered_domain):
-        result["score"] += 40
+    ):
+        result["score"] += points
         result["reasons"].append(
-            f"The page appears to identify as {brand.title()}, "
-            f"but the registered domain is {registered_domain}."
+            reason
         )
 
-    # Lookalike / typo domain check.
-    lookalike = detect_lookalike_domain(registered_domain)
-    result["lookalike_brand"] = lookalike
 
-    if lookalike and lookalike != brand:
-        result["score"] += 30
+    # 5. Check whether redirects jump between domains.
+    changes, redirect_domains = (
+        count_registered_domain_changes(
+            url,
+            redirects,
+            final_url
+        )
+    )
+
+    result["redirect_domains"] = (
+        redirect_domains
+    )
+
+    if changes == 1:
+        result["score"] += 8
+
+        result["reasons"].append(
+            "The link redirected to a different registered domain."
+        )
+
+    elif changes >= 2:
+        result["score"] += 16
+
+        result["reasons"].append(
+            "The link moved across several different registered domains."
+        )
+
+
+    # 6. Check for brand lookalikes.
+    lookalike = detect_lookalike_domain(
+        registered_domain
+    )
+
+    stronger_lookalike = (
+        detect_stronger_lookalike(
+            registered_domain
+        )
+    )
+
+    if stronger_lookalike:
+        lookalike = stronger_lookalike
+
+    result["lookalike_brand"] = (
+        lookalike
+    )
+
+    if lookalike:
+        result["score"] += 32
+
         result["reasons"].append(
             f"The domain name looks similar to {lookalike.title()}, "
             "but it is not one of that brand's known official domains."
         )
 
-    # Redirects matter mainly when the registered domain changes.
-    entered_domain = get_registered_domain(get_hostname(url))
+
+    # 7. Load the page for the screenshot and form checks.
+    result["page"] = inspect_page(
+        url
+    )
+
+    preview_ok = (
+        result["page"].get(
+            "preview_status"
+        )
+        == "success"
+    )
+
+
+    # 8. Check whether the page strongly claims another brand.
+    brand = None
+
+    if preview_ok:
+        brand = detect_claimed_brand(
+            hostname,
+            registered_domain,
+            result["page"]
+        )
+
+    result["brand"] = brand
 
     if (
-        entered_domain
-        and registered_domain
-        and entered_domain != registered_domain
+        brand
+        and not is_official_brand_domain(
+            brand,
+            registered_domain
+        )
     ):
-        result["score"] += 12
+        result["score"] += 40
+
         result["reasons"].append(
-            "The link redirected to a different registered domain."
+            f"The page appears to identify as {brand.title()}, "
+            f"but the registered domain is {registered_domain}."
         )
 
-    if len(redirects) >= 4:
-        result["score"] += 6
-        result["reasons"].append(
-            "The link used several redirects."
+
+    # 9. Check login forms.
+    if preview_ok:
+
+        password_field = result["page"].get(
+            "password_field",
+            False
         )
 
-    # Punycode can be used for visually similar domains.
-    if hostname.startswith("xn--") or ".xn--" in hostname:
-        result["score"] += 22
-        result["reasons"].append(
-            "The domain uses punycode, which can be used to create lookalike names."
-        )
+        # A password field alone is normal, so this is only a small signal.
+        if password_field:
+            result["score"] += 3
 
-    # Direct IP URLs are unusual for normal public login pages.
-    try:
-        ip_address(hostname)
-        result["score"] += 20
-        result["reasons"].append(
-            "The website uses an IP address instead of a normal domain name."
-        )
-    except ValueError:
-        pass
-
-    # Misleading user-info syntax.
-    if "@" in final_url:
-        result["score"] += 20
-        result["reasons"].append(
-            "The URL contains an @ symbol, which can make the real destination harder to see."
-        )
-
-    # Long URLs are weak evidence only.
-    if len(final_url) > 200:
-        result["score"] += 4
-        result["reasons"].append(
-            "The URL is unusually long."
-        )
-
-    # Password fields are common on legitimate sites, so use a small weight.
-    # Only use page-content signals when the real page loaded.
-    if (
-        result["page"].get("preview_status") == "success"
-        and result["page"].get("password_field")
-    ):
-        result["score"] += 5
-        result["reasons"].append(
-            "The page contains a password field."
-        )
-
-    # Sending a form to another registered domain is a stronger warning.
-    page_forms = []
-
-    if result["page"].get("preview_status") == "success":
-        page_forms = result["page"].get("forms", [])
-
-    for action in page_forms:
-        if not action:
-            continue
-
-        form_domain = get_registered_domain(get_hostname(action))
-
-        if (
-            form_domain
-            and registered_domain
-            and form_domain != registered_domain
-        ):
-            result["score"] += 35
             result["reasons"].append(
-                "A form on the page sends information to a different registered domain."
+                "The page contains a password field."
             )
-            break
 
-    result["score"] = min(result["score"], 100)
+        for action in result["page"].get(
+            "forms",
+            []
+        ):
+
+            if not action:
+                continue
+
+            form_domain = get_registered_domain(
+                get_hostname(action)
+            )
+
+            if (
+                form_domain
+                and registered_domain
+                and form_domain
+                != registered_domain
+            ):
+
+                if is_known_auth_service(
+                    form_domain
+                ):
+                    continue
+
+                if password_field:
+                    result["score"] += 35
+
+                    result["reasons"].append(
+                        "The login form sends information to a different registered domain."
+                    )
+
+                else:
+                    result["score"] += 12
+
+                    result["reasons"].append(
+                        "A form on the page sends information to a different registered domain."
+                    )
+
+                break
+
+
+    # 10. Final result.
+    result["score"] = min(
+        result["score"],
+        100
+    )
 
     if result["score"] >= 70:
-        result["verdict"] = "High Risk"
+        result["verdict"] = (
+            "High Risk"
+        )
+
     elif result["score"] >= 40:
-        result["verdict"] = "Suspicious"
+        result["verdict"] = (
+            "Suspicious"
+        )
+
     elif result["score"] >= 20:
-        result["verdict"] = "Caution"
+        result["verdict"] = (
+            "Caution"
+        )
+
     else:
-        result["verdict"] = "Low Risk"
+        result["verdict"] = (
+            "Low Risk"
+        )
 
     return result
 
@@ -1232,8 +1446,14 @@ if submitted:
     st.subheader("Findings")
 
     if result["reasons"]:
-        for reason in result["reasons"]:
+        for reason in result["reasons"][:5]:
             st.write(reason)
+
+        if len(result["reasons"]) > 5:
+            st.write(
+                f"{len(result['reasons']) - 5} additional technical finding(s) "
+                "are available in the details below."
+            )
     else:
         st.write(
             "No major phishing indicators were found in these checks."
@@ -1361,26 +1581,6 @@ if submitted:
             else "No"
         )
 
-        phishing = result.get("phishing_database", {})
-
-        if phishing.get("checked"):
-            if (
-                phishing.get("listed")
-                and phishing.get("verified")
-                and phishing.get("valid")
-            ):
-                reputation_text = "Listed as verified phishing"
-            elif phishing.get("listed"):
-                reputation_text = "Found in database, but not confirmed as active phishing"
-            else:
-                reputation_text = "No match found"
-        else:
-            reputation_text = "Not available"
-
-        st.write(
-            "Phishing reputation:",
-            reputation_text
-        )
 
 
     with st.expander("Redirects"):
