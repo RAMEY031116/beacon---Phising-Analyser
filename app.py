@@ -531,6 +531,7 @@ st.markdown(
                       stroke-linecap="round"/>
             </svg>
             <span class="yeti-wordmark">Yeti Check</span>
+            <span class="yeti-byline">by bipzilla</span>
         </a>
     </div>
     <div class="yeti-subtitle">
