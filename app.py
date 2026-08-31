@@ -164,7 +164,7 @@ st.markdown(
 
     .preview-wrap img {
         width: 100%;
-        height: 155px;
+        height: 175px;
         object-fit: cover;
         object-position: top;
         border: 1px solid #d7dee7;
@@ -394,6 +394,111 @@ st.markdown(
     section[data-testid="stFileUploaderDropzone"] button * {
         color: #ffffff !important;
     }
+
+    /* Streamlit top chrome: keep it visually consistent instead of a black strip */
+    header[data-testid="stHeader"] {
+        background: rgba(244, 247, 251, 0.96) !important;
+        border-bottom: 1px solid #d7dee7 !important;
+    }
+
+    div[data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+
+    div[data-testid="stDecoration"] {
+        background: #2e5f8a !important;
+    }
+
+    button[data-testid="stBaseButton-headerNoPadding"],
+    button[data-testid="stBaseButton-header"] {
+        color: #17212b !important;
+        background: transparent !important;
+    }
+
+    /* Full-page screenshot lightbox */
+    .yeti-lightbox {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        background: rgba(10, 16, 24, 0.94);
+        padding: 20px;
+        overflow: auto;
+        box-sizing: border-box;
+    }
+
+    .yeti-lightbox:target {
+        display: block;
+    }
+
+    .yeti-lightbox-shell {
+        width: min(1400px, 96vw);
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 18px 55px rgba(0,0,0,0.35);
+    }
+
+    .yeti-lightbox-bar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        background: #ffffff;
+        border-bottom: 1px solid #d7dee7;
+        color: #17212b !important;
+        font-size: 0.9rem;
+        font-weight: 650;
+    }
+
+    .yeti-lightbox-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 38px;
+        height: 38px;
+        padding: 0 12px;
+        border-radius: 8px;
+        background: #224867;
+        color: #ffffff !important;
+        text-decoration: none !important;
+        font-weight: 700;
+    }
+
+    .yeti-lightbox-close:hover {
+        background: #2e5f8a;
+        color: #ffffff !important;
+    }
+
+    .yeti-lightbox-image {
+        display: block;
+        width: 100%;
+        height: auto;
+        max-width: none;
+        margin: 0;
+        background: #ffffff;
+    }
+
+    .preview-wrap img {
+        cursor: zoom-in !important;
+    }
+
+    @media (max-width: 700px) {
+        .yeti-lightbox {
+            padding: 8px;
+        }
+
+        .yeti-lightbox-shell {
+            width: 100%;
+            border-radius: 8px;
+        }
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -1931,12 +2036,11 @@ def render_clickable_preview(
     caption="Website preview"
 ):
     """
-    Show a compact thumbnail in the Yeti result card.
+    Show a small thumbnail in the result tile.
 
-    Clicking the IMAGE opens a dedicated HTML screenshot viewer.
-    The full-page screenshot fills the browser width and the user
-    scrolls down through the page naturally instead of the browser
-    shrinking the entire long screenshot to fit one screen.
+    Clicking the screenshot itself opens an in-page lightbox.
+    The full screenshot is rendered at a readable width and the
+    viewer scrolls vertically through the whole captured website.
     """
 
     if (
@@ -1958,7 +2062,7 @@ def render_clickable_preview(
             "ascii"
         )
 
-        full_image_data = (
+        full_data_url = (
             "data:image/png;base64,"
             + full_encoded
         )
@@ -1980,99 +2084,67 @@ def render_clickable_preview(
             )
         else:
             thumb_data_url = (
-                full_image_data
+                full_data_url
             )
 
-        # Build a simple full-width browser viewer.
-        # This avoids Chrome shrinking a very tall standalone PNG
-        # into a tiny image that fits the whole screen.
-        viewer_html = f"""
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{caption} - Full webpage screenshot</title>
-<style>
-    html, body {{
-        margin: 0;
-        padding: 0;
-        background: #eef1f5;
-        font-family: Arial, sans-serif;
-    }}
-
-    .viewer-header {{
-        position: sticky;
-        top: 0;
-        z-index: 10;
-        background: #ffffff;
-        border-bottom: 1px solid #d7dee7;
-        padding: 12px 18px;
-        color: #17212b;
-        font-size: 14px;
-        font-weight: 600;
-    }}
-
-    .image-frame {{
-        width: 100%;
-        margin: 0 auto;
-        background: #ffffff;
-    }}
-
-    .image-frame img {{
-        display: block;
-        width: 100%;
-        height: auto;
-        max-width: none;
-        margin: 0;
-        padding: 0;
-    }}
-</style>
-</head>
-<body>
-    <div class="viewer-header">
-        Full webpage screenshot — scroll down to view the whole page
-    </div>
-
-    <div class="image-frame">
-        <img
-            src="{full_image_data}"
-            alt="{caption}"
-        >
-    </div>
-</body>
-</html>
-"""
-
-        viewer_encoded = base64.b64encode(
-            viewer_html.encode(
-                "utf-8"
-            )
-        ).decode(
-            "ascii"
+        viewer_id = (
+            "yeti-view-"
+            + hashlib.sha256(
+                screenshot_path.encode(
+                    "utf-8",
+                    errors="ignore"
+                )
+            ).hexdigest()[:10]
         )
 
-        viewer_data_url = (
-            "data:text/html;base64,"
-            + viewer_encoded
+        safe_caption = (
+            caption.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
         )
 
         st.markdown(
             f"""
             <div class="preview-wrap">
                 <a
-                    href="{viewer_data_url}"
-                    target="_blank"
+                    href="#{viewer_id}"
                     title="Open full webpage screenshot"
+                    aria-label="Open full webpage screenshot for {safe_caption}"
                 >
                     <img
                         src="{thumb_data_url}"
-                        alt="{caption}"
+                        alt="{safe_caption}"
                     >
                 </a>
 
                 <div class="preview-note">
-                    Click image to open the full webpage screenshot.
+                    Click image to view the full webpage.
+                </div>
+            </div>
+
+            <div
+                id="{viewer_id}"
+                class="yeti-lightbox"
+                aria-label="Full webpage screenshot viewer"
+            >
+                <div class="yeti-lightbox-shell">
+                    <div class="yeti-lightbox-bar">
+                        <span>{safe_caption} — full-page screenshot</span>
+                        <a
+                            href="#"
+                            class="yeti-lightbox-close"
+                            aria-label="Close screenshot"
+                        >
+                            Close
+                        </a>
+                    </div>
+
+                    <img
+                        class="yeti-lightbox-image"
+                        src="{full_data_url}"
+                        alt="Full webpage screenshot of {safe_caption}"
+                    >
                 </div>
             </div>
             """,
