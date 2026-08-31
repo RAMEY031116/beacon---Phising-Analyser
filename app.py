@@ -368,6 +368,83 @@ st.markdown(
         font-size: 0.88rem !important;
     }
 
+
+    .risk-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        border-radius: 12px;
+        padding: 0.9rem 1rem;
+        margin: 0.7rem 0 0.8rem 0;
+        border: 1px solid transparent;
+    }
+
+    .risk-banner-domain {
+        font-size: 1.08rem;
+        font-weight: 700;
+        line-height: 1.2;
+        word-break: break-word;
+    }
+
+    .risk-banner-status {
+        margin-top: 0.18rem;
+        font-size: 0.82rem;
+        opacity: 0.78;
+    }
+
+    .risk-banner-verdict {
+        font-size: 1.35rem;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    .risk-low {
+        background: #e8f7ee;
+        border-color: #b7e3c5;
+        color: #14532d;
+    }
+
+    .risk-caution {
+        background: #fff7dc;
+        border-color: #f2d77d;
+        color: #7a5200;
+    }
+
+    .risk-suspicious {
+        background: #fff0df;
+        border-color: #efbe84;
+        color: #8a3d08;
+    }
+
+    .risk-high {
+        background: #fde8e8;
+        border-color: #efb4b4;
+        color: #8a1c1c;
+    }
+
+    .risk-unavailable {
+        background: #eef2f6;
+        border-color: #d4dce5;
+        color: #344054;
+    }
+
+    .risk-banner * {
+        color: inherit !important;
+    }
+
+    @media (max-width: 650px) {
+        .risk-banner {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .risk-banner-verdict {
+            font-size: 1.2rem;
+        }
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -2923,23 +3000,42 @@ if submitted:
             cert_text = f"{days_left} days"
 
         # ----------------------------------------------------
-        # Website title
+        # Website name + colour-coded Yeti risk FIRST
         # ----------------------------------------------------
+
+        verdict = result.get(
+            "verdict",
+            "Unable to Check"
+        )
+
+        risk_class = {
+            "Low Risk": "risk-low",
+            "Caution": "risk-caution",
+            "Suspicious": "risk-suspicious",
+            "High Risk": "risk-high",
+            "Unable to Check": "risk-unavailable"
+        }.get(
+            verdict,
+            "risk-unavailable"
+        )
 
         st.markdown(
             f"""
-            <div class="result-card">
-                <div class="result-title">{domain}</div>
-                <div class="muted">
-                    {result.get("site_status", "Unknown")}
+            <div class="risk-banner {risk_class}">
+                <div>
+                    <div class="risk-banner-domain">{domain}</div>
+                    <div class="risk-banner-status">
+                        {result.get("site_status", "Unknown")}
+                    </div>
                 </div>
+                <div class="risk-banner-verdict">{verdict}</div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
         # ----------------------------------------------------
-        # Screenshot FIRST
+        # Screenshot directly below the risk banner
         # ----------------------------------------------------
 
         if (
@@ -2968,24 +3064,6 @@ if submitted:
             st.info(
                 "The website preview could not be loaded."
             )
-
-        # ----------------------------------------------------
-        # Overall YETI result at the top
-        # ----------------------------------------------------
-
-        st.markdown(
-            f"""
-            <div class="result-card" style="margin-top:0.4rem;">
-                <div style="font-size:0.78rem; color:#667085; margin-bottom:0.15rem;">
-                    Yeti Risk
-                </div>
-                <div style="font-size:1.75rem; font-weight:750; color:#17212b;">
-                    {result["verdict"]}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
 
         # Short human-readable conclusion
         if result.get(
