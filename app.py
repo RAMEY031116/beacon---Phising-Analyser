@@ -45,6 +45,16 @@ st.set_page_config(
     layout="wide"
 )
 
+# ------------------------------------------------------------
+# APPEARANCE
+# ------------------------------------------------------------
+
+if "yeti_appearance" not in st.session_state:
+    st.session_state["yeti_appearance"] = "System"
+
+appearance = st.session_state["yeti_appearance"]
+
+
 MAX_LINKS_PER_CHECK = 8
 USE_PHISHTANK = True
 USE_OPENPHISH = True
@@ -85,352 +95,402 @@ PHISHTANK_APP_KEY = get_secret(
 # THEME-SAFE STYLE
 # ------------------------------------------------------------
 
-st.markdown(
+
+def get_theme_values(mode):
+    if mode == "Dark":
+        return {
+            "page": "#101820",
+            "surface": "#18232e",
+            "surface2": "#202d39",
+            "text": "#f3f6f9",
+            "muted": "#b8c3ce",
+            "border": "#394957",
+            "accent": "#67a9cc",
+            "accent_hover": "#7bb8d7",
+            "input": "#18232e",
+            "input_text": "#f3f6f9",
+        }
+
+    if mode == "Light":
+        return {
+            "page": "#f5f7fa",
+            "surface": "#ffffff",
+            "surface2": "#f0f4f7",
+            "text": "#17212b",
+            "muted": "#667085",
+            "border": "#d7dee7",
+            "accent": "#2c6e91",
+            "accent_hover": "#235a78",
+            "input": "#ffffff",
+            "input_text": "#17212b",
+        }
+
+    # System uses a light baseline plus a browser dark-mode override.
+    return {
+        "page": "#f5f7fa",
+        "surface": "#ffffff",
+        "surface2": "#f0f4f7",
+        "text": "#17212b",
+        "muted": "#667085",
+        "border": "#d7dee7",
+        "accent": "#2c6e91",
+        "accent_hover": "#235a78",
+        "input": "#ffffff",
+        "input_text": "#17212b",
+    }
+
+
+theme = get_theme_values(
+    appearance
+)
+
+system_dark_css = ""
+
+if appearance == "System":
+    system_dark_css = """
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --yeti-page: #101820;
+            --yeti-surface: #18232e;
+            --yeti-surface2: #202d39;
+            --yeti-text: #f3f6f9;
+            --yeti-muted: #b8c3ce;
+            --yeti-border: #394957;
+            --yeti-accent: #67a9cc;
+            --yeti-accent-hover: #7bb8d7;
+            --yeti-input: #18232e;
+            --yeti-input-text: #f3f6f9;
+        }
+    }
     """
+
+st.markdown(
+    f"""
     <style>
-    :root {
-        --yeti-page: #f6f8fb;
-        --yeti-surface: #ffffff;
-        --yeti-text: #17212b;
-        --yeti-muted: #667085;
-        --yeti-border: #d7dee7;
-        --yeti-blue: #295f86;
-        --yeti-blue-hover: #1f4d6e;
-        --yeti-soft: #eef4f8;
-    }
+    :root {{
+        --yeti-page: {theme["page"]};
+        --yeti-surface: {theme["surface"]};
+        --yeti-surface2: {theme["surface2"]};
+        --yeti-text: {theme["text"]};
+        --yeti-muted: {theme["muted"]};
+        --yeti-border: {theme["border"]};
+        --yeti-accent: {theme["accent"]};
+        --yeti-accent-hover: {theme["accent_hover"]};
+        --yeti-input: {theme["input"]};
+        --yeti-input-text: {theme["input_text"]};
+    }}
 
-    html, body, .stApp {
-        background: var(--background-color) !important;
-        color: var(--text-color) !important;
-    }
+    {system_dark_css}
 
-    .block-container {
+    html, body, .stApp {{
+        background: var(--yeti-page) !important;
+        color: var(--yeti-text) !important;
+    }}
+
+    .block-container {{
         max-width: 980px;
-        padding-top: 1.2rem;
+        padding-top: 1rem;
         padding-bottom: 3rem;
-    }
+    }}
 
-    /* Yeti header */
-    .yeti-header {
+    /* Hide Streamlit chrome completely.
+       This removes the black bar and repository/source controls. */
+    header[data-testid="stHeader"],
+    div[data-testid="stToolbar"],
+    div[data-testid="stDecoration"] {{
+        display: none !important;
+    }}
+
+    .stApp > header {{
+        display: none !important;
+    }}
+
+    #MainMenu,
+    footer {{
+        visibility: hidden !important;
+    }}
+
+    .yeti-header {{
         display: flex;
         justify-content: center;
-        margin: 0.25rem 0 0.1rem 0;
-    }
+        margin: 0.15rem 0 0.1rem 0;
+    }}
 
-    .yeti-home {
+    .yeti-home {{
         display: inline-flex;
         align-items: center;
         gap: 0.65rem;
         text-decoration: none !important;
         padding: 0.3rem 0.45rem;
         border-radius: 10px;
-    }
+    }}
 
-    .yeti-home:hover {
-        background: var(--yeti-soft) !important;
-    }
+    .yeti-home:hover {{
+        background: var(--yeti-surface2) !important;
+    }}
 
-    .yeti-logo {
+    .yeti-logo {{
         width: 48px;
         height: 48px;
         flex: 0 0 48px;
-    }
+    }}
 
-    .yeti-wordmark {
+    .yeti-wordmark {{
         font-size: 2rem;
         font-weight: 750;
         letter-spacing: -0.03em;
-        color: var(--text-color) !important;
-    }
+        color: var(--yeti-text) !important;
+    }}
 
-    .yeti-subtitle {
+    .yeti-subtitle {{
         text-align: center;
         color: var(--yeti-muted) !important;
-        margin-bottom: 1rem;
+        margin-bottom: 0.85rem;
         font-size: 0.93rem;
-    }
+    }}
 
-    /* Main textarea */
+    .stApp p,
+    .stApp label,
+    .stApp h1,
+    .stApp h2,
+    .stApp h3,
+    .stApp h4,
+    .stApp h5,
+    .stApp h6 {{
+        color: var(--yeti-text) !important;
+    }}
+
     .stTextArea textarea,
-    .stTextInput input {
-        background: var(--secondary-background-color) !important;
-        color: var(--text-color) !important;
-        caret-color: var(--text-color) !important;
-        border: 1px solid #cbd4df !important;
+    .stTextInput input {{
+        background: var(--yeti-input) !important;
+        color: var(--yeti-input-text) !important;
+        caret-color: var(--yeti-input-text) !important;
+        border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
         box-shadow: none !important;
-    }
-
-    .stTextArea textarea:focus,
-    .stTextInput input:focus {
-        border-color: var(--yeti-blue) !important;
-        box-shadow: 0 0 0 1px var(--yeti-blue) !important;
-    }
+    }}
 
     .stTextArea textarea::placeholder,
-    .stTextInput input::placeholder {
-        color: #8994a3 !important;
-        opacity: 1 !important;
-    }
+    .stTextInput input::placeholder {{
+        color: var(--yeti-muted) !important;
+        opacity: 0.9 !important;
+    }}
 
-    /* Uploaders */
-    section[data-testid="stFileUploaderDropzone"] {
-        background: var(--secondary-background-color) !important;
-        border: 1px dashed #bfc9d5 !important;
-        border-radius: 9px !important;
-        min-height: 105px !important;
-    }
+    .stTextArea textarea:focus,
+    .stTextInput input:focus {{
+        border-color: var(--yeti-accent) !important;
+        box-shadow: 0 0 0 1px var(--yeti-accent) !important;
+    }}
 
-    section[data-testid="stFileUploaderDropzone"] *,
-    div[data-testid="stFileUploader"] * {
-        color: var(--text-color) !important;
-    }
-
-    section[data-testid="stFileUploaderDropzone"] button {
-        background: #eef4f8 !important;
-        color: #23445b !important;
-        border: 1px solid #bdd0dc !important;
-        border-radius: 7px !important;
-    }
-
-    section[data-testid="stFileUploaderDropzone"] button * {
-        color: #23445b !important;
-    }
-
-    /* Main buttons */
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button,
-    div[data-testid="stDownloadButton"] button {
-        background: var(--primary-color) !important;
+    div[data-testid="stDownloadButton"] button {{
+        background: var(--yeti-accent) !important;
         color: #ffffff !important;
-        border: 1px solid var(--primary-color) !important;
+        border: 1px solid var(--yeti-accent) !important;
         border-radius: 8px !important;
         font-weight: 650 !important;
-        min-height: 2.55rem;
-    }
+        min-height: 2.5rem;
+    }}
 
     .stButton > button *,
     div[data-testid="stFormSubmitButton"] > button *,
-    div[data-testid="stDownloadButton"] button * {
+    div[data-testid="stDownloadButton"] button * {{
         color: #ffffff !important;
-    }
+    }}
 
     .stButton > button:hover,
     div[data-testid="stFormSubmitButton"] > button:hover,
-    div[data-testid="stDownloadButton"] button:hover {
-        background: var(--yeti-blue-hover) !important;
-        border-color: var(--yeti-blue-hover) !important;
+    div[data-testid="stDownloadButton"] button:hover {{
+        background: var(--yeti-accent-hover) !important;
+        border-color: var(--yeti-accent-hover) !important;
         color: #ffffff !important;
-    }
+    }}
 
-    /* Results */
-    .result-card {
-        background: var(--secondary-background-color) !important;
+    section[data-testid="stFileUploaderDropzone"] {{
+        background: var(--yeti-surface) !important;
+        color: var(--yeti-text) !important;
+        border: 1px dashed var(--yeti-border) !important;
+        border-radius: 9px !important;
+    }}
+
+    section[data-testid="stFileUploaderDropzone"] *,
+    div[data-testid="stFileUploader"] * {{
+        color: var(--yeti-text) !important;
+    }}
+
+    section[data-testid="stFileUploaderDropzone"] button {{
+        background: var(--yeti-surface2) !important;
+        color: var(--yeti-text) !important;
+        border: 1px solid var(--yeti-border) !important;
+    }}
+
+    section[data-testid="stFileUploaderDropzone"] button * {{
+        color: var(--yeti-text) !important;
+    }}
+
+    .result-card {{
+        background: var(--yeti-surface) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 10px;
         padding: 0.75rem 0.9rem;
         margin: 0.65rem 0;
-    }
+    }}
 
-    .result-card * {
-        color: var(--text-color) !important;
-    }
-
-    .result-title {
+    .result-title {{
         font-size: 1.05rem;
         font-weight: 700;
-    }
+        color: var(--yeti-text) !important;
+    }}
 
-    .muted {
-        color: color-mix(in srgb, var(--text-color) 65%, transparent) !important;
+    .muted {{
+        color: var(--yeti-muted) !important;
         font-size: 0.86rem;
-    }
+    }}
 
-    div[data-testid="stMetric"] {
-        background: var(--secondary-background-color) !important;
+    div[data-testid="stMetric"] {{
+        background: var(--yeti-surface) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
         padding: 0.65rem !important;
-    }
+    }}
 
     div[data-testid="stMetric"] *,
     div[data-testid="stMetricValue"],
-    div[data-testid="stMetricValue"] * {
-        color: var(--text-color) !important;
-    }
+    div[data-testid="stMetricValue"] * {{
+        color: var(--yeti-text) !important;
+    }}
 
     div[data-testid="stMetricLabel"],
-    div[data-testid="stMetricLabel"] * {
-        color: color-mix(in srgb, var(--text-color) 65%, transparent) !important;
-    }
+    div[data-testid="stMetricLabel"] * {{
+        color: var(--yeti-muted) !important;
+    }}
 
-    /* Details */
-    div[data-testid="stExpander"] {
-        background: var(--secondary-background-color) !important;
+    div[data-testid="stExpander"] {{
+        background: var(--yeti-surface) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
         overflow: hidden !important;
-    }
+    }}
 
     div[data-testid="stExpander"] details,
-    div[data-testid="stExpander"] summary,
-    div[data-testid="stExpander"] * {
-        color: var(--text-color) !important;
-    }
+    div[data-testid="stExpander"] summary {{
+        background: var(--yeti-surface) !important;
+        color: var(--yeti-text) !important;
+    }}
 
-    div[data-testid="stExpander"] summary {
-        background: var(--secondary-background-color) !important;
-    }
+    div[data-testid="stExpander"] summary:hover {{
+        background: var(--yeti-surface2) !important;
+    }}
 
-    div[data-testid="stExpander"] summary:hover {
-        background: #f3f6f9 !important;
-    }
-
-    div[data-testid="stExpander"] svg {
-        color: var(--text-color) !important;
+    div[data-testid="stExpander"] *,
+    div[data-testid="stExpander"] svg {{
+        color: var(--yeti-text) !important;
         fill: currentColor !important;
-    }
+    }}
 
-    /* Alerts */
-    div[data-testid="stAlert"] {
-        border-radius: 9px !important;
-    }
+    div[data-testid="stTabs"] button,
+    div[data-testid="stTabs"] button * {{
+        color: var(--yeti-text) !important;
+    }}
 
-    div[data-testid="stAlert"] * {
-        color: var(--text-color) !important;
-    }
-
-    /* Screenshot */
-    div[data-testid="stImage"] {
+    div[data-testid="stImage"] {{
         max-width: 820px;
         margin: 0.4rem auto 1rem auto;
-    }
+    }}
 
-    div[data-testid="stImage"] img {
+    div[data-testid="stImage"] img {{
         border: 1px solid var(--yeti-border);
         border-radius: 10px;
-        background: var(--secondary-background-color);
-    }
+        background: var(--yeti-surface);
+    }}
 
-    hr {
-        border-color: var(--yeti-border) !important;
-    }
-
-    @media (max-width: 700px) {
-        .block-container {
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }
-
-        .yeti-wordmark {
-            font-size: 1.65rem;
-        }
-
-        .yeti-logo {
-            width: 42px;
-            height: 42px;
-        }
-    }
-
-    /* Keep optional upload area compact */
-    div[data-testid="stExpander"] {
-        margin-top: 0.35rem;
-        margin-bottom: 0.55rem;
-    }
-
-    div[data-testid="stTabs"] button {
-        font-size: 0.88rem !important;
-    }
-
-
-    .risk-banner {
+    /* Risk colours remain meaningful in both themes */
+    .risk-banner {{
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 1rem;
-        border-radius: 12px;
-        padding: 0.9rem 1rem;
-        margin: 0.7rem 0 0.8rem 0;
+        border-radius: 11px;
+        padding: 0.85rem 1rem;
+        margin: 0.65rem 0 0.8rem 0;
         border: 1px solid transparent;
-    }
+    }}
 
-    .risk-banner-domain {
-        font-size: 1.08rem;
+    .risk-banner-domain {{
+        font-size: 1.05rem;
         font-weight: 700;
         line-height: 1.2;
         word-break: break-word;
-    }
+    }}
 
-    .risk-banner-status {
-        margin-top: 0.18rem;
-        font-size: 0.82rem;
+    .risk-banner-status {{
+        margin-top: 0.15rem;
+        font-size: 0.8rem;
         opacity: 0.78;
-    }
+    }}
 
-    .risk-banner-verdict {
-        font-size: 1.35rem;
+    .risk-banner-verdict {{
+        font-size: 1.3rem;
         font-weight: 800;
         white-space: nowrap;
-    }
+    }}
 
-    .risk-low {
-        background: #e8f7ee;
-        border-color: #b7e3c5;
+    .risk-low {{
+        background: #dff4e7;
+        border-color: #addbbd;
         color: #14532d;
-    }
+    }}
 
-    .risk-caution {
-        background: #fff7dc;
-        border-color: #f2d77d;
-        color: #7a5200;
-    }
+    .risk-caution {{
+        background: #fff4d2;
+        border-color: #ead17a;
+        color: #745000;
+    }}
 
-    .risk-suspicious {
-        background: #fff0df;
-        border-color: #efbe84;
-        color: #8a3d08;
-    }
+    .risk-suspicious {{
+        background: #ffe9d4;
+        border-color: #e7b57e;
+        color: #82400c;
+    }}
 
-    .risk-high {
-        background: #fde8e8;
-        border-color: #efb4b4;
-        color: #8a1c1c;
-    }
+    .risk-high {{
+        background: #fbdede;
+        border-color: #e8aaaa;
+        color: #831b1b;
+    }}
 
-    .risk-unavailable {
-        background: #eef2f6;
-        border-color: #d4dce5;
-        color: #344054;
-    }
+    .risk-unavailable {{
+        background: var(--yeti-surface2);
+        border-color: var(--yeti-border);
+        color: var(--yeti-text);
+    }}
 
-    .risk-banner * {
+    .risk-banner * {{
         color: inherit !important;
-    }
+    }}
 
-    @media (max-width: 650px) {
-        .risk-banner {
+    hr {{
+        border-color: var(--yeti-border) !important;
+    }}
+
+    @media (max-width: 650px) {{
+        .block-container {{
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }}
+
+        .risk-banner {{
             align-items: flex-start;
             flex-direction: column;
-            gap: 0.4rem;
-        }
-
-        .risk-banner-verdict {
-            font-size: 1.2rem;
-        }
-    }
-
-
-    @media (max-width: 650px) {
-        div[data-testid="stExpander"] div[style*="grid-template-columns: 160px 1fr"] {
-            grid-template-columns: 1fr !important;
-            gap: 0.25rem !important;
-        }
-    }
-
+            gap: 0.35rem;
+        }}
+    }}
     </style>
     """,
     unsafe_allow_html=True
 )
+
 
 
 # ------------------------------------------------------------
@@ -491,6 +551,38 @@ with st.expander("What Yeti Check does"):
     st.write(
         "Yeti Check is an investigation aid. A low-risk result does not guarantee that a website is genuine."
     )
+
+
+
+with st.expander("Settings"):
+    new_appearance = st.radio(
+        "Appearance",
+        options=[
+            "System",
+            "Light",
+            "Dark"
+        ],
+        horizontal=True,
+        index=[
+            "System",
+            "Light",
+            "Dark"
+        ].index(
+            st.session_state.get(
+                "yeti_appearance",
+                "System"
+            )
+        ),
+        help="System follows your device appearance."
+    )
+
+    if new_appearance != st.session_state[
+        "yeti_appearance"
+    ]:
+        st.session_state[
+            "yeti_appearance"
+        ] = new_appearance
+        st.rerun()
 
 
 # ------------------------------------------------------------
@@ -3133,6 +3225,41 @@ if submitted:
         # ----------------------------------------------------
         # Everything technical stays in one place
         # ----------------------------------------------------
+
+        with st.expander(
+            "Why this result?"
+        ):
+            findings = result.get(
+                "reasons",
+                []
+            )
+
+            if findings:
+                for finding in findings[:4]:
+                    clean_finding = finding
+
+                    if "Google Web Risk reports this URL for malware" in clean_finding:
+                        clean_finding = (
+                            "A live reputation source reports this URL as malicious."
+                        )
+
+                    elif "Google Web Risk reports this URL for phishing / social engineering" in clean_finding:
+                        clean_finding = (
+                            "A live reputation source reports this URL as phishing or deceptive."
+                        )
+
+                    elif "Google Web Risk reports this URL for phishing / social engineering and malware" in clean_finding:
+                        clean_finding = (
+                            "A live reputation source reports this URL as phishing and malicious."
+                        )
+
+                    st.write(
+                        clean_finding
+                    )
+            else:
+                st.write(
+                    "No major warning signs were found by the checks that completed."
+                )
 
         with st.expander(
             "Website details"
