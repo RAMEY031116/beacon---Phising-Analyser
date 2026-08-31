@@ -1,3 +1,4 @@
+
 import streamlit as st
 import requests
 import socket
@@ -6,6 +7,7 @@ import os
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from ipaddress import ip_address
+from difflib import SequenceMatcher
 
 import tldextract
 from playwright.sync_api import sync_playwright
@@ -19,6 +21,16 @@ st.set_page_config(
     page_title="Yeti Check",
     layout="wide"
 )
+
+
+# ------------------------------------------------------------
+# OPTIONAL REPUTATION CHECK
+# ------------------------------------------------------------
+# PhishTank is a public phishing database.
+# Set this to False if you do not want scanned URLs sent there.
+
+USE_PHISHTANK = True
+PHISHTANK_APP_KEY = os.getenv("PHISHTANK_APP_KEY", "").strip()
 
 
 # ------------------------------------------------------------
@@ -109,6 +121,7 @@ st.markdown(
         color: inherit;
     }
 
+
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button {
         background-color: #1f2933 !important;
@@ -137,6 +150,7 @@ st.markdown(
     div[data-testid="stFormSubmitButton"] > button p {
         color: #ffffff !important;
     }
+
 
     /* Keep Streamlit metric cards readable in every theme */
     div[data-testid="stMetric"] {
@@ -254,6 +268,10 @@ st.markdown(
 # ------------------------------------------------------------
 # KNOWN OFFICIAL DOMAINS
 # ------------------------------------------------------------
+# This is only used when there is strong evidence that a page
+# is pretending to be one of these brands.
+#
+# A normal social link does NOT count as brand impersonation.
 
 KNOWN_BRANDS = {
     "microsoft": [
@@ -376,10 +394,6 @@ def check_host_is_safe(hostname):
     if lower in ("localhost", "localhost.localdomain"):
         return False, "Local addresses are not allowed"
 
-    # Direct IP hostname
-    if is_private_or_local_ip(hostname):
-        return False, "Private or local network addresses are not allowed"
-
     addresses = resolve_ip(hostname)
 
     if not addresses:
@@ -395,7 +409,6 @@ def check_host_is_safe(hostname):
 def safe_request(url):
     current_url = url
     redirect_chain = []
-    response = None
 
     for _ in range(6):
         hostname = get_hostname(current_url)
@@ -428,9 +441,6 @@ def safe_request(url):
 
         return response, current_url, redirect_chain
 
-    if response is None:
-        raise Exception("The website could not be requested.")
-
     return response, current_url, redirect_chain
 
 
@@ -453,6 +463,7 @@ def get_tls_information(hostname):
                 result["valid"] = True
 
                 issuer_parts = cert.get("issuer", [])
+
                 issuer_text = []
 
                 for group in issuer_parts:
@@ -541,34 +552,95 @@ def get_rdap_information(domain):
     return result
 
 
-def detect_brand_from_url_and_title(hostname, page_title):
-    """
-    Only use strong signals.
+def check_phishtank(url):
+    result = {
+        "checked": False,
+        "listed": False,
+        "verified": False,
+        "valid": False
+    }
 
-    We do NOT scan all page text for words like LinkedIn because
-    business websites commonly contain normal social links.
+    if not USE_PHISHTANK:
+        return result
+
+    try:
+        data = {
+            "url": url,
+            "format": "json"
+        }
+
+        if PHISHTANK_APP_KEY:
+            data["app_key"] = PHISHTANK_APP_KEY
+
+        response = requests.post(
+            "https://checkurl.phishtank.com/checkurl/",
+            data=data,
+            timeout=12,
+            headers={"User-Agent": "YetiCheck/1.0"}
+        )
+
+        if response.status_code != 200:
+            return result
+
+        payload = response.json()
+        details = payload.get("results", {})
+
+        result["checked"] = True
+
+        def yes(value):
+            return str(value).lower() in (
+                "true", "yes", "y", "1"
+            )
+
+        result["listed"] = yes(details.get("in_database", False))
+        result["verified"] = yes(details.get("verified", False))
+        result["valid"] = yes(details.get("valid", False))
+
+    except Exception:
+        pass
+
+    return result
+
+
+def detect_claimed_brand(hostname, registered_domain, page):
+    """
+    Only use strong identity signals.
+
+    Normal social links are ignored, so a company website containing
+    a LinkedIn link will not be treated as LinkedIn.
     """
 
     hostname_lower = hostname.lower()
-    title_lower = (page_title or "").lower()
+    title = (page.get("title", "") or "").lower()
+    site_name = (page.get("site_name", "") or "").lower()
+    heading = (page.get("heading", "") or "").lower()
+    password_field = page.get("password_field", False)
 
     for brand in KNOWN_BRANDS:
         if brand in hostname_lower:
             return brand
 
-    for brand in KNOWN_BRANDS:
-        strong_title_phrases = [
+        if brand in site_name and site_name.strip():
+            return brand
+
+        phrases = [
             f"{brand} login",
             f"{brand} sign in",
             f"sign in to {brand}",
             f"log in to {brand}",
             f"{brand} account",
-            f"{brand} verification"
+            f"{brand} verification",
+            f"{brand} security"
         ]
 
-        for phrase in strong_title_phrases:
-            if phrase in title_lower:
+        combined = title + " " + heading
+
+        for phrase in phrases:
+            if phrase in combined:
                 return brand
+
+        if password_field and (brand in title or brand in heading):
+            return brand
 
     return None
 
@@ -577,9 +649,54 @@ def is_official_brand_domain(brand, registered_domain):
     if not brand:
         return True
 
-    official_domains = KNOWN_BRANDS.get(brand, [])
+    return registered_domain.lower() in KNOWN_BRANDS.get(brand, [])
 
-    return registered_domain.lower() in official_domains
+
+def simple_edit_distance(first, second):
+    rows = len(first) + 1
+    columns = len(second) + 1
+    table = [[0] * columns for _ in range(rows)]
+
+    for row in range(rows):
+        table[row][0] = row
+
+    for column in range(columns):
+        table[0][column] = column
+
+    for row in range(1, rows):
+        for column in range(1, columns):
+            cost = 0 if first[row - 1] == second[column - 1] else 1
+            table[row][column] = min(
+                table[row - 1][column] + 1,
+                table[row][column - 1] + 1,
+                table[row - 1][column - 1] + cost
+            )
+
+    return table[-1][-1]
+
+
+def detect_lookalike_domain(registered_domain):
+    extracted = tldextract.extract(registered_domain)
+    domain_name = extracted.domain.lower()
+
+    if not domain_name:
+        return None
+
+    for brand in KNOWN_BRANDS:
+        if is_official_brand_domain(brand, registered_domain):
+            continue
+
+        if brand in domain_name and domain_name != brand:
+            return brand
+
+        if len(brand) >= 5:
+            distance = simple_edit_distance(domain_name, brand)
+            similarity = SequenceMatcher(None, domain_name, brand).ratio()
+
+            if distance == 1 or similarity >= 0.88:
+                return brand
+
+    return None
 
 
 def get_browser_path():
@@ -596,26 +713,15 @@ def get_browser_path():
     return None
 
 
-# ------------------------------------------------------------
-# PLAYWRIGHT PAGE INSPECTION
-# ------------------------------------------------------------
-
-def inspect_page(start_url):
-    """
-    Open the URL in a real browser, allow wrapper/scanning pages to
-    redirect using JavaScript, wait for the final URL to stabilise,
-    then inspect and screenshot the actual landing page.
-    """
-
+def inspect_page(final_url):
     result = {
         "title": "Unknown",
+        "site_name": "",
+        "heading": "",
         "password_field": False,
         "email_field": False,
         "forms": [],
-        "screenshot": None,
-        "final_url": start_url,
-        "browser_redirects": [],
-        "browser_error": None
+        "screenshot": None
     }
 
     screenshot_path = "yeti_screenshot.png"
@@ -638,145 +744,18 @@ def inspect_page(start_url):
 
             browser = p.chromium.launch(**launch_options)
 
-            context = browser.new_context(
+            page = browser.new_page(
                 viewport={
                     "width": 1366,
                     "height": 768
                 }
             )
 
-            page = context.new_page()
-
-            navigation_urls = []
-
-            def track_navigation(frame):
-                if frame == page.main_frame:
-                    url = frame.url
-
-                    if url and url != "about:blank" and url not in navigation_urls:
-                        navigation_urls.append(url)
-
-            page.on("framenavigated", track_navigation)
-
-            # ------------------------------------------------
-            # BLOCK OBVIOUS PRIVATE/LOCAL BROWSER REQUESTS
-            # ------------------------------------------------
-            # This protects against common SSRF cases in the browser.
-            # We only block requests where the hostname is directly
-            # an IP/private/local host. DNS-backed hosts are rechecked
-            # after navigation before the result is accepted.
-
-            def route_handler(route):
-                request_url = route.request.url
-                parsed = urlparse(request_url)
-                hostname = parsed.hostname or ""
-
-                # Allow browser-internal/data/blob schemes.
-                if parsed.scheme not in ("http", "https"):
-                    route.continue_()
-                    return
-
-                if hostname.lower() in ("localhost", "localhost.localdomain"):
-                    route.abort()
-                    return
-
-                try:
-                    direct_ip = ip_address(hostname)
-
-                    if (
-                        direct_ip.is_private
-                        or direct_ip.is_loopback
-                        or direct_ip.is_link_local
-                        or direct_ip.is_reserved
-                        or direct_ip.is_multicast
-                        or direct_ip.is_unspecified
-                    ):
-                        route.abort()
-                        return
-
-                except ValueError:
-                    pass
-
-                route.continue_()
-
-            context.route("**/*", route_handler)
-
-            # Initial URL was already safety checked before Playwright.
             page.goto(
-                start_url,
+                final_url,
                 wait_until="domcontentloaded",
                 timeout=30000
             )
-
-            # Give wrapper pages time to start JS/meta redirects.
-            page.wait_for_timeout(1500)
-
-            # ------------------------------------------------
-            # WAIT FOR FINAL BROWSER URL TO STABILISE
-            # ------------------------------------------------
-            previous_url = None
-            stable_count = 0
-
-            # Maximum wait here is ~12 seconds.
-            # URL must remain unchanged for ~2 seconds.
-            for _ in range(24):
-                current_url = page.url
-
-                if current_url == previous_url:
-                    stable_count += 1
-                else:
-                    stable_count = 0
-                    previous_url = current_url
-
-                if stable_count >= 4:
-                    break
-
-                page.wait_for_timeout(500)
-
-            # Give the actual landing page a chance to render.
-            try:
-                page.wait_for_load_state(
-                    "domcontentloaded",
-                    timeout=10000
-                )
-            except Exception:
-                pass
-
-            try:
-                page.wait_for_load_state(
-                    "networkidle",
-                    timeout=8000
-                )
-            except Exception:
-                # Modern sites can keep analytics/websocket requests
-                # alive indefinitely, so networkidle is best effort.
-                pass
-
-            page.wait_for_timeout(1000)
-
-            actual_final_url = page.url
-            final_hostname = get_hostname(actual_final_url)
-
-            # Validate the actual final destination.
-            safe, message = check_host_is_safe(final_hostname)
-
-            if not safe:
-                browser.close()
-                raise Exception(
-                    f"Browser redirect blocked: {message}"
-                )
-
-            result["final_url"] = actual_final_url
-
-            result["browser_redirects"] = [
-                url
-                for url in navigation_urls
-                if url != start_url
-            ]
-
-            # ------------------------------------------------
-            # INSPECT FINAL PAGE
-            # ------------------------------------------------
 
             try:
                 result["title"] = page.title()
@@ -784,11 +763,23 @@ def inspect_page(start_url):
                 pass
 
             try:
-                result["password_field"] = (
-                    page.locator(
-                        'input[type="password"]'
-                    ).count() > 0
-                )
+                meta = page.locator('meta[property="og:site_name"]')
+                if meta.count() > 0:
+                    result["site_name"] = meta.first.get_attribute("content") or ""
+            except Exception:
+                pass
+
+            try:
+                heading = page.locator("h1")
+                if heading.count() > 0:
+                    result["heading"] = heading.first.inner_text(timeout=2000) or ""
+            except Exception:
+                pass
+
+            try:
+                result["password_field"] = page.locator(
+                    'input[type="password"]'
+                ).count() > 0
             except Exception:
                 pass
 
@@ -799,16 +790,15 @@ def inspect_page(start_url):
                     'input[name*="user" i]'
                 )
 
-                result["email_field"] = (
-                    page.locator(
-                        email_selectors
-                    ).count() > 0
-                )
+                result["email_field"] = page.locator(
+                    email_selectors
+                ).count() > 0
             except Exception:
                 pass
 
             try:
                 forms = page.locator("form")
+
                 count = min(forms.count(), 20)
 
                 for i in range(count):
@@ -818,7 +808,7 @@ def inspect_page(start_url):
 
                     if action:
                         action = requests.compat.urljoin(
-                            actual_final_url,
+                            final_url,
                             action
                         )
 
@@ -826,10 +816,6 @@ def inspect_page(start_url):
 
             except Exception:
                 pass
-
-            # ------------------------------------------------
-            # SCREENSHOT FINAL LANDING PAGE
-            # ------------------------------------------------
 
             try:
                 page.screenshot(
@@ -844,15 +830,11 @@ def inspect_page(start_url):
 
             browser.close()
 
-    except Exception as error:
-        result["browser_error"] = str(error)
+    except Exception:
+        pass
 
     return result
 
-
-# ------------------------------------------------------------
-# ANALYSIS
-# ------------------------------------------------------------
 
 def analyse_url(url):
     result = {
@@ -866,57 +848,61 @@ def analyse_url(url):
         "rdap": {},
         "tls": {},
         "page": {},
+        "phishing_database": {},
         "brand": None,
-        "brand_mismatch": False
+        "lookalike_brand": None
     }
 
-    # First follow ordinary HTTP redirects safely.
-    response, requests_final_url, redirects = safe_request(url)
+    response, final_url, redirects = safe_request(url)
 
-    result["final_url"] = requests_final_url
+    result["final_url"] = final_url
     result["redirects"] = redirects
 
-    # Then use Playwright to follow delayed JS/meta/security-wrapper
-    # redirects and reach the true browser landing page.
-    page_result = inspect_page(requests_final_url)
-    result["page"] = page_result
-
-    browser_final_url = page_result.get(
-        "final_url",
-        requests_final_url
-    ) or requests_final_url
-
-    # If Playwright failed entirely, keep the requests final URL.
-    if page_result.get("browser_error"):
-        browser_final_url = requests_final_url
-
-    # Merge browser redirects into the visible redirect chain.
-    for redirect_url in page_result.get("browser_redirects", []):
-        if (
-            redirect_url
-            and redirect_url != url
-            and redirect_url not in result["redirects"]
-        ):
-            result["redirects"].append(redirect_url)
-
-    result["final_url"] = browser_final_url
-
-    # All domain/certificate/RDAP analysis now uses the REAL landing page.
-    hostname = get_hostname(browser_final_url)
-
-    safe, message = check_host_is_safe(hostname)
-
-    if not safe:
-        raise Exception(message)
-
+    hostname = get_hostname(final_url)
     registered_domain = get_registered_domain(hostname)
 
     result["hostname"] = hostname
     result["registered_domain"] = registered_domain
     result["ip_addresses"] = resolve_ip(hostname)
-    result["rdap"] = get_rdap_information(registered_domain)
 
-    if browser_final_url.startswith("https://"):
+    # Reputation check. A positive match is strong evidence.
+    # No match does not mean the website is safe.
+    result["phishing_database"] = check_phishtank(final_url)
+    phishing = result["phishing_database"]
+
+    if (
+        phishing.get("listed")
+        and phishing.get("verified")
+        and phishing.get("valid")
+    ):
+        result["score"] += 70
+        result["reasons"].append(
+            "This address is listed as a verified phishing page in PhishTank."
+        )
+
+    # Registration age. New domains are only supporting evidence.
+    result["rdap"] = get_rdap_information(registered_domain)
+    age = result["rdap"].get("age_days")
+
+    if age is not None:
+        if age < 14:
+            result["score"] += 25
+            result["reasons"].append(
+                "The domain was registered less than 14 days ago."
+            )
+        elif age < 30:
+            result["score"] += 18
+            result["reasons"].append(
+                "The domain was registered less than 30 days ago."
+            )
+        elif age < 180:
+            result["score"] += 6
+            result["reasons"].append(
+                "The domain was registered less than 6 months ago."
+            )
+
+    # HTTPS certificate.
+    if final_url.startswith("https://"):
         result["tls"] = get_tls_information(hostname)
     else:
         result["tls"] = {
@@ -925,117 +911,115 @@ def analyse_url(url):
             "issuer": "Unknown",
             "expires": "Unknown"
         }
+        result["score"] += 12
+        result["reasons"].append(
+            "The final page is not using HTTPS."
+        )
 
-    page_title = result["page"].get("title", "")
+    # Inspect the page.
+    result["page"] = inspect_page(final_url)
 
-    brand = detect_brand_from_url_and_title(
+    # Strong brand identity check.
+    brand = detect_claimed_brand(
         hostname,
-        page_title
+        registered_domain,
+        result["page"]
     )
-
     result["brand"] = brand
 
-    if brand:
-        if not is_official_brand_domain(
-            brand,
-            registered_domain
-        ):
-            result["brand_mismatch"] = True
-            result["score"] += 40
-            result["reasons"].append(
-                f"The website appears to identify as {brand.title()}, "
-                f"but the registered domain is {registered_domain}."
-            )
+    if brand and not is_official_brand_domain(brand, registered_domain):
+        result["score"] += 40
+        result["reasons"].append(
+            f"The page appears to identify as {brand.title()}, "
+            f"but the registered domain is {registered_domain}."
+        )
 
-    age = result["rdap"].get("age_days")
+    # Lookalike / typo domain check.
+    lookalike = detect_lookalike_domain(registered_domain)
+    result["lookalike_brand"] = lookalike
 
-    if age is not None:
-        if age < 30:
-            result["score"] += 25
-            result["reasons"].append(
-                "The domain was registered less than 30 days ago."
-            )
-        elif age < 180:
-            result["score"] += 10
-            result["reasons"].append(
-                "The domain was registered less than 6 months ago."
-            )
+    if lookalike and lookalike != brand:
+        result["score"] += 30
+        result["reasons"].append(
+            f"The domain name looks similar to {lookalike.title()}, "
+            "but it is not one of that brand's known official domains."
+        )
 
-    # Compare what the user entered with the true browser landing domain.
-    entered_domain = get_registered_domain(
-        get_hostname(url)
-    )
+    # Redirects matter mainly when the registered domain changes.
+    entered_domain = get_registered_domain(get_hostname(url))
 
-    final_domain = registered_domain
+    if (
+        entered_domain
+        and registered_domain
+        and entered_domain != registered_domain
+    ):
+        result["score"] += 12
+        result["reasons"].append(
+            "The link redirected to a different registered domain."
+        )
 
-    if entered_domain and final_domain:
-        if entered_domain != final_domain:
-            result["score"] += 15
-            result["reasons"].append(
-                "The link redirected to a different registered domain."
-            )
-
-    if len(result["redirects"]) >= 3:
-        result["score"] += 10
+    if len(redirects) >= 4:
+        result["score"] += 6
         result["reasons"].append(
             "The link used several redirects."
         )
 
+    # Punycode can be used for visually similar domains.
     if hostname.startswith("xn--") or ".xn--" in hostname:
-        result["score"] += 20
+        result["score"] += 22
         result["reasons"].append(
-            "The domain uses punycode, which can sometimes be used for lookalike domains."
+            "The domain uses punycode, which can be used to create lookalike names."
         )
 
+    # Direct IP URLs are unusual for normal public login pages.
     try:
         ip_address(hostname)
-
         result["score"] += 20
         result["reasons"].append(
             "The website uses an IP address instead of a normal domain name."
         )
-
     except ValueError:
         pass
 
-    if "@" in browser_final_url:
+    # Misleading user-info syntax.
+    if "@" in final_url:
         result["score"] += 20
         result["reasons"].append(
-            "The URL contains an @ symbol, which can be misleading."
+            "The URL contains an @ symbol, which can make the real destination harder to see."
         )
 
-    if len(browser_final_url) > 180:
-        result["score"] += 8
+    # Long URLs are weak evidence only.
+    if len(final_url) > 200:
+        result["score"] += 4
         result["reasons"].append(
             "The URL is unusually long."
         )
 
+    # Password fields are common on legitimate sites, so use a small weight.
     if result["page"].get("password_field"):
-        result["score"] += 15
+        result["score"] += 5
         result["reasons"].append(
             "The page contains a password field."
         )
 
+    # Sending a form to another registered domain is a stronger warning.
     for action in result["page"].get("forms", []):
         if not action:
             continue
 
-        form_host = get_hostname(action)
+        form_domain = get_registered_domain(get_hostname(action))
 
-        # Ignore unusual form actions that have no hostname.
-        if not form_host:
-            continue
-
-        form_domain = get_registered_domain(form_host)
-
-        if form_domain and form_domain != final_domain:
-            result["score"] += 25
+        if (
+            form_domain
+            and registered_domain
+            and form_domain != registered_domain
+        ):
+            result["score"] += 35
             result["reasons"].append(
                 "A form on the page sends information to a different registered domain."
             )
             break
 
-    # Keep the score within the display range.
     result["score"] = min(result["score"], 100)
 
     if result["score"] >= 70:
@@ -1053,6 +1037,7 @@ def analyse_url(url):
 # ------------------------------------------------------------
 # INPUT
 # ------------------------------------------------------------
+# A form means pressing Enter inside the box starts the check.
 
 with st.form("website_check", clear_on_submit=False):
     website = st.text_input(
@@ -1065,7 +1050,7 @@ with st.form("website_check", clear_on_submit=False):
 
 
 # ------------------------------------------------------------
-# RUN CHECK
+# ANALYSIS
 # ------------------------------------------------------------
 
 if submitted:
@@ -1249,11 +1234,26 @@ if submitted:
             else "No"
         )
 
-        if result["page"].get("browser_error"):
-            st.write(
-                "Browser inspection note:",
-                result["page"]["browser_error"]
-            )
+        phishing = result.get("phishing_database", {})
+
+        if phishing.get("checked"):
+            if (
+                phishing.get("listed")
+                and phishing.get("verified")
+                and phishing.get("valid")
+            ):
+                reputation_text = "Listed as verified phishing"
+            elif phishing.get("listed"):
+                reputation_text = "Found in database, but not confirmed as active phishing"
+            else:
+                reputation_text = "No match found"
+        else:
+            reputation_text = "Not available"
+
+        st.write(
+            "Phishing reputation:",
+            reputation_text
+        )
 
 
     with st.expander("Redirects"):
@@ -1302,3 +1302,4 @@ if submitted:
     if st.button("Reset", key="reset_button"):
         st.session_state["website_input"] = ""
         st.rerun()
+
