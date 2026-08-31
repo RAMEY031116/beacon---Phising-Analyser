@@ -8,6 +8,7 @@ import re
 import io
 import base64
 import hashlib
+from PIL import Image
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -151,40 +152,102 @@ st.markdown(
     }
 
     .preview-wrap {
-        margin: 0.35rem auto 0.6rem auto;
-        max-width: 235px;
+        margin: 0 0 0.55rem 0;
+        width: 100%;
     }
 
     .preview-wrap a {
         display: block;
+        width: 100%;
         text-decoration: none !important;
     }
 
     .preview-wrap img {
-        width: 225px;
-        max-width: 100%;
-        aspect-ratio: 1 / 1;
+        width: 100%;
+        height: 155px;
         object-fit: cover;
         object-position: top;
-        border: 1px solid var(--yeti-border);
-        border-radius: 12px;
+        border: 1px solid #d7dee7;
+        border-radius: 8px;
         display: block;
-        margin: 0 auto;
         background: #ffffff;
         cursor: zoom-in;
         transition: transform 0.12s ease, box-shadow 0.12s ease;
     }
 
     .preview-wrap img:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 16px rgba(0,0,0,0.14);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.13);
     }
 
     .preview-note {
-        text-align: center;
         color: var(--yeti-muted) !important;
-        font-size: 0.76rem;
-        margin-top: 0.3rem;
+        font-size: 0.73rem;
+        margin-top: 0.25rem;
+    }
+
+    .website-tile {
+        background: #ffffff !important;
+        border: 1px solid #d7dee7 !important;
+        border-radius: 9px;
+        padding: 0.7rem;
+        margin-bottom: 0.4rem;
+        min-height: 0;
+    }
+
+    .website-tile * {
+        color: #17212b !important;
+    }
+
+    .website-tile-title {
+        font-size: 0.98rem;
+        line-height: 1.25;
+        font-weight: 700;
+        word-break: break-word;
+        margin-bottom: 0.15rem;
+    }
+
+    .website-tile-status {
+        color: #667085 !important;
+        font-size: 0.78rem;
+        margin-bottom: 0.35rem;
+    }
+
+    .website-tile-facts {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.35rem;
+        margin-top: 0.45rem;
+    }
+
+    .website-tile-fact {
+        border-top: 1px solid #e5eaf0;
+        padding-top: 0.35rem;
+        min-width: 0;
+    }
+
+    .website-tile-label {
+        display: block;
+        color: #667085 !important;
+        font-size: 0.68rem;
+        line-height: 1.15;
+    }
+
+    .website-tile-value {
+        display: block;
+        color: #17212b !important;
+        font-size: 0.83rem;
+        font-weight: 650;
+        line-height: 1.2;
+        margin-top: 0.08rem;
+        overflow-wrap: anywhere;
+    }
+
+    .website-tile-reason {
+        margin-top: 0.5rem;
+        font-size: 0.79rem;
+        line-height: 1.35;
+        color: #344054 !important;
     }
 
     .tile-domain {
@@ -1807,13 +1870,69 @@ def inspect_page(browser_url):
     return result
 
 
+def make_preview_thumbnail(
+    screenshot_path,
+    width=720,
+    height=420
+):
+    """
+    Create a real thumbnail from the TOP of the full-page screenshot.
+    The full screenshot is kept unchanged for the click-to-enlarge view.
+    """
+
+    try:
+        image = Image.open(
+            screenshot_path
+        ).convert("RGB")
+
+        original_width, original_height = image.size
+
+        # Crop a browser-like area from the top of the full-page image.
+        desired_ratio = width / height
+        crop_height = int(
+            original_width / desired_ratio
+        )
+
+        crop_height = min(
+            crop_height,
+            original_height
+        )
+
+        cropped = image.crop(
+            (
+                0,
+                0,
+                original_width,
+                crop_height
+            )
+        )
+
+        cropped.thumbnail(
+            (width, height)
+        )
+
+        buffer = io.BytesIO()
+
+        cropped.save(
+            buffer,
+            format="JPEG",
+            quality=82,
+            optimize=True
+        )
+
+        return buffer.getvalue()
+
+    except Exception:
+        return None
+
+
 def render_clickable_preview(
     screenshot_path,
     caption="Website preview"
 ):
     """
-    Show a fixed-size preview.
-    Clicking it opens the screenshot at full browser size in a new tab.
+    The card uses a small cropped thumbnail.
+    Clicking ONLY the image opens the original full-page screenshot.
     """
 
     if not screenshot_path or not os.path.exists(
@@ -1822,29 +1941,47 @@ def render_clickable_preview(
         return
 
     try:
-        image_bytes = Path(
+        full_bytes = Path(
             screenshot_path
         ).read_bytes()
 
-        encoded = base64.b64encode(
-            image_bytes
+        full_encoded = base64.b64encode(
+            full_bytes
         ).decode(
             "ascii"
         )
 
-        data_url = (
+        full_data_url = (
             "data:image/png;base64,"
-            + encoded
+            + full_encoded
         )
+
+        thumbnail_bytes = make_preview_thumbnail(
+            screenshot_path
+        )
+
+        if thumbnail_bytes:
+            thumb_encoded = base64.b64encode(
+                thumbnail_bytes
+            ).decode(
+                "ascii"
+            )
+
+            thumb_data_url = (
+                "data:image/jpeg;base64,"
+                + thumb_encoded
+            )
+        else:
+            thumb_data_url = full_data_url
 
         st.markdown(
             f"""
             <div class="preview-wrap">
-                <a href="{data_url}" target="_blank" title="Open larger screenshot">
-                    <img src="{data_url}" alt="{caption}">
+                <a href="{full_data_url}" target="_blank" title="Open full-page screenshot">
+                    <img src="{thumb_data_url}" alt="{caption}">
                 </a>
                 <div class="preview-note">
-                    Click image to view the full-page screenshot.
+                    Click image to open the full-page screenshot.
                 </div>
             </div>
             """,
@@ -2589,9 +2726,9 @@ if submitted:
                 low
             )
 
-    # Compact tile layout.
-    # Two columns on normal desktop widths; Streamlit stacks them on smaller screens.
-    columns_per_row = 2 if len(results) > 1 else 1
+    # Compact product-style cards.
+    # Three cards per row on desktop; Streamlit naturally stacks on narrow screens.
+    columns_per_row = 3 if len(results) > 1 else 1
 
     for row_start in range(
         0,
@@ -2603,15 +2740,16 @@ if submitted:
         ]
 
         if columns_per_row == 1:
-            row_columns = st.columns(
-                [0.12, 0.76, 0.12]
+            outer_columns = st.columns(
+                [0.2, 0.6, 0.2]
             )
             active_columns = [
-                row_columns[1]
+                outer_columns[1]
             ]
         else:
             active_columns = st.columns(
-                columns_per_row
+                columns_per_row,
+                gap="medium"
             )
 
         for column, result in zip(
@@ -2656,12 +2794,19 @@ if submitted:
                     "screenshot"
                 )
 
-                # Domain/title first.
+                if days_left is None:
+                    cert_text = "Unknown"
+                elif days_left < 0:
+                    cert_text = "Expired"
+                else:
+                    cert_text = f"{days_left} days"
+
+                # Card header.
                 st.markdown(
                     f"""
-                    <div class="result-card">
-                        <div class="tile-domain">{domain}</div>
-                        <div class="tile-status">
+                    <div class="website-tile">
+                        <div class="website-tile-title">{domain}</div>
+                        <div class="website-tile-status">
                             {result.get("site_status", "Unknown")}
                         </div>
                     </div>
@@ -2669,7 +2814,7 @@ if submitted:
                     unsafe_allow_html=True
                 )
 
-                # Small thumbnail; click opens full-page screenshot.
+                # A TRUE small thumbnail, not the full long image squeezed into the card.
                 if (
                     screenshot
                     and os.path.exists(
@@ -2685,7 +2830,7 @@ if submitted:
                     "preview_status"
                 ) == "blocked":
                     st.info(
-                        "Preview blocked by the website."
+                        "Website preview blocked."
                     )
 
                 elif preview.get(
@@ -2695,77 +2840,63 @@ if submitted:
                         "Preview unavailable."
                     )
 
-                # Keep the visible tile very compact.
-                metric_col1, metric_col2 = st.columns(
-                    2
+                # Compact card facts instead of four large Streamlit metric boxes.
+                reason = (
+                    result["reasons"][0]
+                    if result.get(
+                        "reasons"
+                    )
+                    else "No major phishing indicators were found."
                 )
 
-                with metric_col1:
-                    st.metric(
-                        "Risk",
-                        result["verdict"]
+                age_text = (
+                    f"{age} days"
+                    if age is not None
+                    else "Unknown"
+                )
+
+                https_text = (
+                    "Valid"
+                    if tls.get(
+                        "valid"
                     )
+                    else "Not validated"
+                )
 
-                with metric_col2:
-                    st.metric(
-                        "Domain age",
-                        (
-                            f"{age} days"
-                            if age is not None
-                            else "Unknown"
-                        )
-                    )
-
-                if days_left is None:
-                    cert_text = "Unknown"
-                elif days_left < 0:
-                    cert_text = "Expired"
-                else:
-                    cert_text = f"{days_left} days"
-
-                if result.get(
-                    "reasons"
-                ):
-                    st.markdown(
-                        f"""
-                        <div class="tile-summary">
-                            {result["reasons"][0]}
+                st.markdown(
+                    f"""
+                    <div class="website-tile">
+                        <div class="website-tile-facts">
+                            <div class="website-tile-fact">
+                                <span class="website-tile-label">Risk</span>
+                                <span class="website-tile-value">{result["verdict"]}</span>
+                            </div>
+                            <div class="website-tile-fact">
+                                <span class="website-tile-label">Domain age</span>
+                                <span class="website-tile-value">{age_text}</span>
+                            </div>
+                            <div class="website-tile-fact">
+                                <span class="website-tile-label">HTTPS</span>
+                                <span class="website-tile-value">{https_text}</span>
+                            </div>
+                            <div class="website-tile-fact">
+                                <span class="website-tile-label">Certificate</span>
+                                <span class="website-tile-value">{cert_text}</span>
+                            </div>
                         </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                else:
-                    st.markdown(
-                        """
-                        <div class="tile-summary">
-                            No major phishing indicators were found.
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                        <div class="website-tile-reason">{reason}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
+                # Useful details always sit at the bottom of the website card.
                 with st.expander(
                     "Website details"
                 ):
                     st.write(
                         "Risk score:",
                         f"{result.get('score', 0)}/100"
-                    )
-
-                    st.write(
-                        "HTTPS:",
-                        (
-                            "Valid"
-                            if tls.get(
-                                "valid"
-                            )
-                            else "Not validated"
-                        )
-                    )
-
-                    st.write(
-                        "Certificate expiry:",
-                        cert_text
                     )
 
                     st.write(
@@ -2782,11 +2913,24 @@ if submitted:
                     )
 
                     st.write(
+                        "Website status:",
+                        result.get(
+                            "site_status",
+                            "Unknown"
+                        )
+                    )
+
+                    st.write(
                         "HTTP status:",
                         result.get(
                             "status_code",
                             "Unknown"
                         )
+                    )
+
+                    st.write(
+                        "Domain age:",
+                        age_text
                     )
 
                     st.write(
@@ -2798,6 +2942,16 @@ if submitted:
                             "registrar",
                             "Unknown"
                         )
+                    )
+
+                    st.write(
+                        "HTTPS:",
+                        https_text
+                    )
+
+                    st.write(
+                        "Certificate expires:",
+                        cert_text
                     )
 
                     st.write(
@@ -2861,12 +3015,11 @@ if submitted:
                             "Findings:"
                         )
 
-                        for reason in result[
+                        for finding in result[
                             "reasons"
                         ][:8]:
                             st.write(
-                                reason
+                                finding
                             )
 
                 st.write("")
-
