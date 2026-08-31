@@ -14,7 +14,14 @@ from difflib import SequenceMatcher
 
 import tldextract
 from playwright.sync_api import sync_playwright
-from streamlit_paste_button import paste_image_button
+# Clipboard QR support is optional.
+# The app still works normally if this extra package is not installed.
+try:
+    from streamlit_paste_button import paste_image_button
+    CLIPBOARD_QR_SUPPORT = True
+except ImportError:
+    paste_image_button = None
+    CLIPBOARD_QR_SUPPORT = False
 
 # QR support
 try:
@@ -2150,6 +2157,36 @@ def analyse_url(url):
     return result
 
 
+
+def certificate_days_left(expiry_text):
+    """
+    Convert the certificate expiry date into days remaining.
+    Returns None if the date cannot be read.
+    """
+
+    if not expiry_text or expiry_text == "Unknown":
+        return None
+
+    try:
+        expires = datetime.strptime(
+            expiry_text,
+            "%b %d %H:%M:%S %Y %Z"
+        ).replace(
+            tzinfo=timezone.utc
+        )
+
+        now = datetime.now(
+            timezone.utc
+        )
+
+        return (
+            expires - now
+        ).days
+
+    except Exception:
+        return None
+
+
 # ------------------------------------------------------------
 # REPORT HELPERS
 # ------------------------------------------------------------
@@ -2252,32 +2289,53 @@ pasted_text = st.text_area(
 
 st.write("QR code")
 
-paste_result = paste_image_button(
-    label="Paste QR code",
-    text_color="#ffffff",
-    background_color="#1f2933",
-    hover_background_color="#344150",
-    key=f"paste_qr_{st.session_state['qr_reset_counter']}",
-    errors="ignore"
-)
-
 pasted_qr_image = None
 
-if paste_result is not None:
-    pasted_qr_image = getattr(
-        paste_result,
-        "image_data",
-        None
+if CLIPBOARD_QR_SUPPORT:
+
+    paste_result = paste_image_button(
+        label="Paste QR code",
+        text_color="#ffffff",
+        background_color="#1f2933",
+        hover_background_color="#344150",
+        key=f"paste_qr_{st.session_state['qr_reset_counter']}",
+        errors="ignore"
     )
 
-if pasted_qr_image is not None:
-    st.image(
-        pasted_qr_image,
-        caption="Pasted QR image",
-        width=260
+    if paste_result is not None:
+        pasted_qr_image = getattr(
+            paste_result,
+            "image_data",
+            None
+        )
+
+    if pasted_qr_image is not None:
+        st.image(
+            pasted_qr_image,
+            caption="Pasted QR image",
+            width=260
+        )
+
+    with st.expander("Upload QR image instead"):
+        qr_file = st.file_uploader(
+            "QR code image",
+            type=[
+                "png",
+                "jpg",
+                "jpeg",
+                "webp"
+            ],
+            key="qr_upload",
+            label_visibility="collapsed"
+        )
+
+else:
+
+    st.caption(
+        "Paste from clipboard is not available on this deployment. "
+        "Upload the QR image below instead."
     )
 
-with st.expander("Upload QR image instead"):
     qr_file = st.file_uploader(
         "QR code image",
         type=[
@@ -2286,14 +2344,25 @@ with st.expander("Upload QR image instead"):
             "jpeg",
             "webp"
         ],
-        key="qr_upload",
-        label_visibility="collapsed"
+        key="qr_upload"
     )
 
-submitted = st.button(
-    "Check",
-    key="check_button"
-)
+check_col, reset_col = st.columns(2)
+
+with check_col:
+    submitted = st.button(
+        "Check",
+        key="check_button",
+        use_container_width=True
+    )
+
+with reset_col:
+    st.button(
+        "Reset",
+        key="reset_button_top",
+        on_click=reset_yeti,
+        use_container_width=True
+    )
 
 # ------------------------------------------------------------
 # RUN
@@ -2570,6 +2639,42 @@ if submitted:
             or result["url"]
         )
 
+        age = result.get(
+            "rdap",
+            {}
+        ).get(
+            "age_days"
+        )
+
+        tls = result.get(
+            "tls",
+            {}
+        )
+
+        expiry = tls.get(
+            "expires",
+            "Unknown"
+        )
+
+        days_left = certificate_days_left(
+            expiry
+        )
+
+        screenshot = result.get(
+            "page",
+            {}
+        ).get(
+            "screenshot"
+        )
+
+        preview_status = result.get(
+            "page",
+            {}
+        ).get(
+            "preview_status"
+        )
+
+        # Main result card
         st.markdown(
             f"""
             <div class="result-box">
@@ -2580,59 +2685,94 @@ if submitted:
                     &nbsp; | &nbsp;
                     {result.get("site_status", "Unknown")}
                 </div>
-                <div style="margin-top:0.5rem;">
-                    {main_reason(result)}
-                </div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        with st.expander(
-            f"Details for {domain}"
-        ):
+        # Important information always visible
+        col1, col2, col3, col4 = st.columns(4)
 
-            col_a, col_b, col_c = (
-                st.columns(3)
+        with col1:
+            st.metric(
+                "Risk",
+                result["verdict"]
             )
 
-            with col_a:
-                st.metric(
-                    "Website status",
-                    result.get(
-                        "site_status",
-                        "Unknown"
+        with col2:
+            st.metric(
+                "Domain age",
+                (
+                    f"{age} days"
+                    if age is not None
+                    else "Unknown"
+                )
+            )
+
+        with col3:
+            st.metric(
+                "HTTPS",
+                (
+                    "Valid"
+                    if tls.get(
+                        "valid"
                     )
+                    else "Not validated"
+                )
+            )
+
+        with col4:
+            if days_left is not None:
+                certificate_text = (
+                    f"{days_left} days"
+                    if days_left >= 0
+                    else "Expired"
+                )
+            else:
+                certificate_text = (
+                    "Unknown"
                 )
 
-            with col_b:
-                st.metric(
-                    "HTTP",
-                    (
-                        result.get(
-                            "status_code"
-                        )
-                        if result.get(
-                            "status_code"
-                        ) is not None
-                        else "Unknown"
-                    )
-                )
+            st.metric(
+                "Certificate expiry",
+                certificate_text
+            )
 
-            with col_c:
-                st.metric(
-                    "HTTPS",
-                    (
-                        "Valid"
-                        if result.get(
-                            "tls",
-                            {}
-                        ).get(
-                            "valid"
-                        )
-                        else "Not validated"
-                    )
-                )
+        # Main reason
+        st.write(
+            main_reason(
+                result
+            )
+        )
+
+        # Screenshot shown immediately, not in dropdown
+        if (
+            screenshot
+            and os.path.exists(
+                screenshot
+            )
+        ):
+            st.image(
+                screenshot,
+                caption="Website preview",
+                use_container_width=True
+            )
+
+        elif preview_status == "blocked":
+            st.info(
+                "The website blocked the automated preview. "
+                "This does not mean the site is phishing."
+            )
+
+        elif preview_status == "failed":
+            st.info(
+                "The website preview could not be loaded."
+            )
+
+        # Only less important information goes in one dropdown
+        with st.expander(
+            "More details"
+        ):
 
             st.write(
                 "Original address:",
@@ -2647,19 +2787,11 @@ if submitted:
                 )
             )
 
-            age = result.get(
-                "rdap",
-                {}
-            ).get(
-                "age_days"
-            )
-
             st.write(
-                "Domain age:",
-                (
-                    f"{age} days"
-                    if age is not None
-                    else "Unknown"
+                "HTTP status:",
+                result.get(
+                    "status_code",
+                    "Unknown"
                 )
             )
 
@@ -2675,19 +2807,16 @@ if submitted:
             )
 
             st.write(
-                "Content type:",
-                result.get(
-                    "content_type",
+                "Certificate issuer:",
+                tls.get(
+                    "issuer",
                     "Unknown"
                 )
             )
 
             st.write(
-                "Server:",
-                result.get(
-                    "server",
-                    "Unknown"
-                )
+                "Certificate expiry date:",
+                expiry
             )
 
             phishtank = result.get(
@@ -2734,62 +2863,19 @@ if submitted:
                 )
             )
 
-            st.write(
-                "Findings:"
-            )
-
             if result.get(
                 "reasons"
             ):
+                st.write(
+                    "Findings:"
+                )
 
                 for reason in result[
                     "reasons"
-                ][:8]:
-
+                ][:6]:
                     st.write(
                         reason
                     )
-
-            else:
-
-                st.write(
-                    "No major phishing indicators were found."
-                )
-
-            preview = result.get(
-                "page",
-                {}
-            )
-
-            if preview.get(
-                "preview_status"
-            ) in (
-                "blocked",
-                "failed"
-            ):
-
-                st.info(
-                    preview.get(
-                        "preview_message",
-                        "Preview unavailable."
-                    )
-                )
-
-            screenshot = preview.get(
-                "screenshot"
-            )
-
-            if (
-                screenshot
-                and os.path.exists(
-                    screenshot
-                )
-            ):
-
-                st.image(
-                    screenshot,
-                    use_container_width=True
-                )
 
 
     # --------------------------------------------------------
@@ -2807,8 +2893,3 @@ if submitted:
         mime="text/plain"
     )
 
-    st.button(
-        "Reset",
-        key="reset_button",
-        on_click=reset_yeti
-    )
