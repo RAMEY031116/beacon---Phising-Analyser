@@ -151,24 +151,53 @@ st.markdown(
     }
 
     .preview-wrap {
-        margin: 0.5rem 0 1rem 0;
+        margin: 0.45rem 0 0.7rem 0;
+    }
+
+    .preview-wrap a {
+        display: block;
+        text-decoration: none !important;
     }
 
     .preview-wrap img {
         width: 100%;
-        max-width: 620px;
-        height: 330px;
+        height: 210px;
         object-fit: cover;
         object-position: top;
         border: 1px solid var(--yeti-border);
         border-radius: 9px;
         display: block;
         background: #ffffff;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .preview-wrap img:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
     }
 
     .preview-note {
         color: var(--yeti-muted) !important;
+        font-size: 0.8rem;
+        margin-top: 0.3rem;
+    }
+
+    .tile-domain {
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 0.1rem;
+        word-break: break-word;
+    }
+
+    .tile-status {
+        font-size: 0.84rem;
+        color: var(--yeti-muted) !important;
+        margin-bottom: 0.45rem;
+    }
+
+    .tile-summary {
         font-size: 0.88rem;
+        line-height: 1.35;
         margin-top: 0.35rem;
     }
 
@@ -1728,7 +1757,7 @@ def inspect_page(browser_url):
             try:
                 page.screenshot(
                     path=screenshot_path,
-                    full_page=False
+                    full_page=True
                 )
 
                 result["screenshot"] = screenshot_path
@@ -2158,20 +2187,6 @@ if "qr_reset_counter" not in st.session_state:
 # INPUT
 # ------------------------------------------------------------
 
-st.markdown(
-    """
-    <div class="help-box">
-        <strong>How to check several links:</strong><br>
-        Paste one link per line, or paste the whole email/message and Yeti will find the links automatically.<br><br>
-        Example:<br>
-        tesco.com<br>
-        https://microsoft.com<br>
-        https://example.co.uk/login
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
 current_text = st.session_state.get(
     "yeti_text",
     ""
@@ -2193,8 +2208,7 @@ text_height = min(
 pasted_text = st.text_area(
     "Links or message",
     placeholder=(
-        "Paste one link, several links (one per line), "
-        "or paste the whole suspicious message here"
+        "Paste a link, several links one per line, or paste the whole suspicious message"
     ),
     height=text_height,
     key="yeti_text"
@@ -2546,248 +2560,290 @@ if submitted:
                 low
             )
 
-    for result in results:
-        domain = (
-            result.get(
-                "registered_domain"
+    # Compact tile layout.
+    # Two columns on normal desktop widths; Streamlit stacks them on smaller screens.
+    columns_per_row = 2 if len(results) > 1 else 1
+
+    for row_start in range(
+        0,
+        len(results),
+        columns_per_row
+    ):
+        row_items = results[
+            row_start:row_start + columns_per_row
+        ]
+
+        if columns_per_row == 1:
+            row_columns = st.columns(
+                [0.12, 0.76, 0.12]
             )
-            or result["url"]
-        )
-
-        age = result.get(
-            "rdap",
-            {}
-        ).get(
-            "age_days"
-        )
-
-        tls = result.get(
-            "tls",
-            {}
-        )
-
-        expiry = tls.get(
-            "expires",
-            "Unknown"
-        )
-
-        days_left = certificate_days_left(
-            expiry
-        )
-
-        preview = result.get(
-            "page",
-            {}
-        )
-
-        screenshot = preview.get(
-            "screenshot"
-        )
-
-        st.markdown(
-            f"""
-            <div class="result-card">
-                <div class="result-title">{domain}</div>
-                <div class="muted">
-                    {result.get("site_status", "Unknown")}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        # Screenshot FIRST
-        if (
-            screenshot
-            and os.path.exists(
-                screenshot
-            )
-        ):
-            render_clickable_preview(
-                screenshot
-            )
-
-        elif preview.get(
-            "preview_status"
-        ) == "blocked":
-            st.info(
-                preview.get(
-                    "preview_message",
-                    "The automated preview was blocked."
-                )
-            )
-
-        elif preview.get(
-            "preview_status"
-        ) == "failed":
-            st.info(
-                "The website preview could not be loaded."
-            )
-
-        # Only the important facts
-        c1, c2, c3, c4 = st.columns(4)
-
-        with c1:
-            st.metric(
-                "Risk",
-                result["verdict"]
-            )
-
-        with c2:
-            st.metric(
-                "Domain age",
-                (
-                    f"{age} days"
-                    if age is not None
-                    else "Unknown"
-                )
-            )
-
-        with c3:
-            st.metric(
-                "HTTPS",
-                (
-                    "Valid"
-                    if tls.get(
-                        "valid"
-                    )
-                    else "Not validated"
-                )
-            )
-
-        with c4:
-            if days_left is None:
-                cert_text = "Unknown"
-
-            elif days_left < 0:
-                cert_text = "Expired"
-
-            else:
-                cert_text = f"{days_left} days"
-
-            st.metric(
-                "Certificate expiry",
-                cert_text
-            )
-
-        if result.get(
-            "reasons"
-        ):
-            st.write(
-                result["reasons"][0]
-            )
-
+            active_columns = [
+                row_columns[1]
+            ]
         else:
-            st.write(
-                "No major phishing indicators were found."
+            active_columns = st.columns(
+                columns_per_row
             )
 
-        with st.expander(
-            "More details"
+        for column, result in zip(
+            active_columns,
+            row_items
         ):
-            st.write(
-                "Risk score:",
-                f"{result.get('score', 0)}/100"
-            )
-
-            st.write(
-                "Original address:",
-                result["url"]
-            )
-
-            st.write(
-                "Final address:",
-                result.get(
-                    "final_url",
-                    result["url"]
+            with column:
+                domain = (
+                    result.get(
+                        "registered_domain"
+                    )
+                    or result["url"]
                 )
-            )
 
-            st.write(
-                "HTTP status:",
-                result.get(
-                    "status_code",
-                    "Unknown"
-                )
-            )
-
-            st.write(
-                "Registrar:",
-                result.get(
+                age = result.get(
                     "rdap",
                     {}
                 ).get(
-                    "registrar",
+                    "age_days"
+                )
+
+                tls = result.get(
+                    "tls",
+                    {}
+                )
+
+                expiry = tls.get(
+                    "expires",
                     "Unknown"
                 )
-            )
 
-            st.write(
-                "Certificate issuer:",
-                tls.get(
-                    "issuer",
-                    "Unknown"
+                days_left = certificate_days_left(
+                    expiry
                 )
-            )
 
-            st.write(
-                "PhishTank:",
-                (
-                    "Verified phishing match"
-                    if result.get(
-                        "phish_tank",
-                        {}
-                    ).get(
-                        "confirmed"
+                preview = result.get(
+                    "page",
+                    {}
+                )
+
+                screenshot = preview.get(
+                    "screenshot"
+                )
+
+                # Domain/title first.
+                st.markdown(
+                    f"""
+                    <div class="result-card">
+                        <div class="tile-domain">{domain}</div>
+                        <div class="tile-status">
+                            {result.get("site_status", "Unknown")}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                # Small thumbnail; click opens full-page screenshot.
+                if (
+                    screenshot
+                    and os.path.exists(
+                        screenshot
                     )
-                    else (
-                        "No verified match"
-                        if result.get(
-                            "phish_tank",
-                            {}
-                        ).get(
-                            "checked"
+                ):
+                    render_clickable_preview(
+                        screenshot,
+                        caption=domain
+                    )
+
+                elif preview.get(
+                    "preview_status"
+                ) == "blocked":
+                    st.info(
+                        "Preview blocked by the website."
+                    )
+
+                elif preview.get(
+                    "preview_status"
+                ) == "failed":
+                    st.info(
+                        "Preview unavailable."
+                    )
+
+                # Keep tile facts compact.
+                metric_col1, metric_col2 = st.columns(
+                    2
+                )
+
+                with metric_col1:
+                    st.metric(
+                        "Risk",
+                        result["verdict"]
+                    )
+
+                with metric_col2:
+                    st.metric(
+                        "Domain age",
+                        (
+                            f"{age} days"
+                            if age is not None
+                            else "Unknown"
                         )
-                        else "Check unavailable"
                     )
-                )
-            )
 
-            st.write(
-                "OpenPhish:",
-                (
-                    "Listed in community feed"
-                    if result.get(
-                        "openphish",
-                        {}
-                    ).get(
-                        "confirmed"
-                    )
-                    else (
-                        "No match found"
-                        if result.get(
-                            "openphish",
-                            {}
-                        ).get(
-                            "checked"
+                metric_col3, metric_col4 = st.columns(
+                    2
+                )
+
+                with metric_col3:
+                    st.metric(
+                        "HTTPS",
+                        (
+                            "Valid"
+                            if tls.get(
+                                "valid"
+                            )
+                            else "Not validated"
                         )
-                        else "Check unavailable"
                     )
-                )
-            )
 
-            if result.get(
-                "reasons"
-            ):
-                st.write(
-                    "Findings:"
-                )
+                with metric_col4:
+                    if days_left is None:
+                        cert_text = "Unknown"
+                    elif days_left < 0:
+                        cert_text = "Expired"
+                    else:
+                        cert_text = f"{days_left} days"
 
-                for reason in result[
+                    st.metric(
+                        "Certificate",
+                        cert_text
+                    )
+
+                if result.get(
                     "reasons"
-                ][:8]:
-                    st.write(
-                        reason
+                ):
+                    st.markdown(
+                        f"""
+                        <div class="tile-summary">
+                            {result["reasons"][0]}
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.markdown(
+                        """
+                        <div class="tile-summary">
+                            No major phishing indicators were found.
+                        </div>
+                        """,
+                        unsafe_allow_html=True
                     )
 
-        st.divider()
+                with st.expander(
+                    "More details"
+                ):
+                    st.write(
+                        "Risk score:",
+                        f"{result.get('score', 0)}/100"
+                    )
+
+                    st.write(
+                        "Original address:",
+                        result["url"]
+                    )
+
+                    st.write(
+                        "Final address:",
+                        result.get(
+                            "final_url",
+                            result["url"]
+                        )
+                    )
+
+                    st.write(
+                        "HTTP status:",
+                        result.get(
+                            "status_code",
+                            "Unknown"
+                        )
+                    )
+
+                    st.write(
+                        "Registrar:",
+                        result.get(
+                            "rdap",
+                            {}
+                        ).get(
+                            "registrar",
+                            "Unknown"
+                        )
+                    )
+
+                    st.write(
+                        "Certificate issuer:",
+                        tls.get(
+                            "issuer",
+                            "Unknown"
+                        )
+                    )
+
+                    st.write(
+                        "PhishTank:",
+                        (
+                            "Verified phishing match"
+                            if result.get(
+                                "phish_tank",
+                                {}
+                            ).get(
+                                "confirmed"
+                            )
+                            else (
+                                "No verified match"
+                                if result.get(
+                                    "phish_tank",
+                                    {}
+                                ).get(
+                                    "checked"
+                                )
+                                else "Check unavailable"
+                            )
+                        )
+                    )
+
+                    st.write(
+                        "OpenPhish:",
+                        (
+                            "Listed in community feed"
+                            if result.get(
+                                "openphish",
+                                {}
+                            ).get(
+                                "confirmed"
+                            )
+                            else (
+                                "No match found"
+                                if result.get(
+                                    "openphish",
+                                    {}
+                                ).get(
+                                    "checked"
+                                )
+                                else "Check unavailable"
+                            )
+                        )
+                    )
+
+                    if result.get(
+                        "reasons"
+                    ):
+                        st.write(
+                            "Findings:"
+                        )
+
+                        for reason in result[
+                            "reasons"
+                        ][:8]:
+                            st.write(
+                                reason
+                            )
+
+                st.write("")
+
