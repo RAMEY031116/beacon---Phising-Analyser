@@ -1,13 +1,11 @@
-
 import streamlit as st
 import requests
 import socket
 import ssl
 import os
 import re
-import json
 import hashlib
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from ipaddress import ip_address
 from difflib import SequenceMatcher
@@ -15,7 +13,7 @@ from difflib import SequenceMatcher
 import tldextract
 from playwright.sync_api import sync_playwright
 
-# QR reading
+# QR support
 try:
     import cv2
     import numpy as np
@@ -35,28 +33,29 @@ st.set_page_config(
 
 
 # ------------------------------------------------------------
-# SIMPLE SETTINGS
+# SETTINGS
 # ------------------------------------------------------------
 
-# These checks use free public services.
-# No API key is required.
-#
-# Set this to False if you do not want Yeti to send URLs
-# to external reputation services.
-USE_EXTERNAL_REPUTATION = True
-
-# Keep batch checks reasonable so one pasted email cannot
-# accidentally launch hundreds of browser checks.
 MAX_LINKS_PER_CHECK = 10
 
+# These use free public phishing sources and need no paid setup.
+USE_PHISHTANK = True
+USE_OPENPHISH = True
+
+OPENPHISH_FEED = "https://openphish.com/feed.txt"
+
 
 # ------------------------------------------------------------
-# PAGE STYLE
+# THEME SAFE STYLE
 # ------------------------------------------------------------
 
 st.markdown(
     """
     <style>
+
+    html, body, [class*="css"] {
+        color: #1f2933 !important;
+    }
 
     .stApp {
         background-color: #f5f7fa !important;
@@ -86,17 +85,20 @@ st.markdown(
     .result-box {
         background-color: #ffffff !important;
         color: #1f2933 !important;
-        border: 1px solid #d8dee6;
+        border: 1px solid #d8dee6 !important;
         border-radius: 8px;
         padding: 1rem 1.2rem;
         margin-top: 1rem;
         margin-bottom: 1rem;
     }
 
+    .result-box * {
+        color: #1f2933 !important;
+    }
+
     .result-title {
         font-size: 1.1rem;
         font-weight: 700;
-        color: #1f2933 !important;
         margin-bottom: 0.2rem;
     }
 
@@ -105,6 +107,7 @@ st.markdown(
     }
 
     .stApp p,
+    .stApp span,
     .stApp label,
     .stApp h1,
     .stApp h2,
@@ -143,13 +146,8 @@ st.markdown(
     }
 
     div[data-testid="stMetricLabel"],
-    div[data-testid="stMetricLabel"] p {
+    div[data-testid="stMetricLabel"] * {
         color: #5f6c7b !important;
-    }
-
-    div[data-testid="stMetricValue"],
-    div[data-testid="stMetricValue"] div {
-        color: #1f2933 !important;
     }
 
     div[data-testid="stExpander"] {
@@ -163,11 +161,12 @@ st.markdown(
         color: #1f2933 !important;
     }
 
-    div[data-testid="stAlert"] p,
-    div[data-testid="stAlert"] div {
+    div[data-testid="stAlert"] *,
+    div[data-testid="stNotification"] * {
         color: #1f2933 !important;
     }
 
+    /* Normal buttons */
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button {
         background-color: #1f2933 !important;
@@ -184,9 +183,43 @@ st.markdown(
 
     .stButton > button:hover,
     div[data-testid="stFormSubmitButton"] > button:hover {
-        background-color: #2f3b49 !important;
+        background-color: #344150 !important;
         color: #ffffff !important;
-        border-color: #2f3b49 !important;
+        border-color: #344150 !important;
+    }
+
+    /* Download button */
+    div[data-testid="stDownloadButton"] button {
+        background-color: #1f2933 !important;
+        color: #ffffff !important;
+        border: 1px solid #1f2933 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    div[data-testid="stDownloadButton"] button * {
+        color: #ffffff !important;
+    }
+
+    /* File uploader / Browse files */
+    section[data-testid="stFileUploaderDropzone"] {
+        background-color: #ffffff !important;
+        color: #1f2933 !important;
+        border-color: #c8d0da !important;
+    }
+
+    section[data-testid="stFileUploaderDropzone"] * {
+        color: #1f2933 !important;
+    }
+
+    section[data-testid="stFileUploaderDropzone"] button {
+        background-color: #1f2933 !important;
+        color: #ffffff !important;
+        border: 1px solid #1f2933 !important;
+    }
+
+    section[data-testid="stFileUploaderDropzone"] button * {
+        color: #ffffff !important;
     }
 
     </style>
@@ -203,7 +236,7 @@ st.markdown(
     """
     <div class="main-title">Yeti Check</div>
     <div class="sub-title">
-        Check links before you use them
+        Check websites, messages and QR codes before you use them
     </div>
     """,
     unsafe_allow_html=True
@@ -262,9 +295,22 @@ KNOWN_BRANDS = {
     ]
 }
 
+SHORTENERS = {
+    "bit.ly",
+    "tinyurl.com",
+    "t.co",
+    "cutt.ly",
+    "rb.gy",
+    "is.gd",
+    "buff.ly",
+    "ow.ly",
+    "rebrand.ly",
+    "shorturl.at"
+}
+
 
 # ------------------------------------------------------------
-# URL EXTRACTION
+# INPUT EXTRACTION
 # ------------------------------------------------------------
 
 def clean_url(value):
@@ -277,11 +323,6 @@ def clean_url(value):
 
 
 def extract_urls_from_text(text):
-    """
-    Finds normal http/https links and common www links
-    inside pasted emails, Teams messages or plain text.
-    """
-
     if not text:
         return []
 
@@ -300,38 +341,31 @@ def extract_urls_from_text(text):
         if item not in urls:
             urls.append(item)
 
-    # If the user pasted only a bare domain such as tesco.com,
-    # accept that too.
+    # Accept a bare domain when it is the only pasted value.
     if not urls:
         simple = text.strip()
 
         if (
             " " not in simple
-            and "." in simple
             and "\n" not in simple
+            and "." in simple
         ):
-            urls.append(clean_url(simple))
+            urls.append(
+                clean_url(simple)
+            )
 
     return urls
 
 
 def decode_qr_codes(uploaded_file):
-    """
-    Decode one or more QR codes from an uploaded image.
-    Uses OpenCV locally. No external service is used.
-    """
-
-    if not QR_SUPPORT:
-        return []
-
-    if uploaded_file is None:
+    if not QR_SUPPORT or uploaded_file is None:
         return []
 
     try:
-        data = uploaded_file.getvalue()
+        raw = uploaded_file.getvalue()
 
         image_array = np.frombuffer(
-            data,
+            raw,
             dtype=np.uint8
         )
 
@@ -345,27 +379,25 @@ def decode_qr_codes(uploaded_file):
 
         detector = cv2.QRCodeDetector()
 
-        decoded = []
+        values = []
 
-        # Try multiple QR codes first.
         try:
-            ok, values, points, _ = (
+            ok, decoded, points, _ = (
                 detector.detectAndDecodeMulti(
                     image
                 )
             )
 
             if ok:
-                for value in values:
-                    if value:
-                        decoded.append(
-                            value.strip()
+                for item in decoded:
+                    if item:
+                        values.append(
+                            item.strip()
                         )
         except Exception:
             pass
 
-        # Fallback to a single QR code.
-        if not decoded:
+        if not values:
             try:
                 value, points, _ = (
                     detector.detectAndDecode(
@@ -374,20 +406,20 @@ def decode_qr_codes(uploaded_file):
                 )
 
                 if value:
-                    decoded.append(
+                    values.append(
                         value.strip()
                     )
             except Exception:
                 pass
 
-        return decoded
+        return values
 
     except Exception:
         return []
 
 
 # ------------------------------------------------------------
-# DOMAIN FUNCTIONS
+# DOMAIN HELPERS
 # ------------------------------------------------------------
 
 def get_hostname(url):
@@ -401,18 +433,18 @@ def get_registered_domain(hostname):
     if not hostname:
         return ""
 
-    extracted = tldextract.extract(
+    result = tldextract.extract(
         hostname
     )
 
     if (
-        not extracted.domain
-        or not extracted.suffix
+        not result.domain
+        or not result.suffix
     ):
         return hostname.lower()
 
     return (
-        f"{extracted.domain}.{extracted.suffix}"
+        f"{result.domain}.{result.suffix}"
         .lower()
     )
 
@@ -420,11 +452,11 @@ def get_registered_domain(hostname):
 def get_domain_name_only(
     registered_domain
 ):
-    extracted = tldextract.extract(
+    result = tldextract.extract(
         registered_domain
     )
 
-    return extracted.domain.lower()
+    return result.domain.lower()
 
 
 # ------------------------------------------------------------
@@ -458,10 +490,12 @@ def resolve_ip(hostname):
         addresses = []
 
         for record in records:
-            value = record[4][0]
+            address = record[4][0]
 
-            if value not in addresses:
-                addresses.append(value)
+            if address not in addresses:
+                addresses.append(
+                    address
+                )
 
         return addresses
 
@@ -477,20 +511,14 @@ def check_host_is_safe(hostname):
         "localhost",
         "localhost.localdomain"
     ):
-        return (
-            False,
-            "Local addresses are not allowed"
-        )
+        return False, "Local addresses are not allowed"
 
     addresses = resolve_ip(
         hostname
     )
 
     if not addresses:
-        return (
-            False,
-            "The hostname could not be resolved"
-        )
+        return False, "The hostname could not be resolved"
 
     for address in addresses:
         if is_private_or_local_ip(
@@ -505,7 +533,7 @@ def check_host_is_safe(hostname):
 
 
 # ------------------------------------------------------------
-# REDIRECTS
+# HTTP / REDIRECT CHECK
 # ------------------------------------------------------------
 
 def safe_request(url):
@@ -519,10 +547,8 @@ def safe_request(url):
             current_url
         )
 
-        safe, message = (
-            check_host_is_safe(
-                hostname
-            )
+        safe, message = check_host_is_safe(
+            hostname
         )
 
         if not safe:
@@ -568,7 +594,6 @@ def safe_request(url):
             )
 
             current_url = next_url
-
             continue
 
         return (
@@ -582,6 +607,31 @@ def safe_request(url):
         current_url,
         redirect_chain
     )
+
+
+def classify_http_status(status_code):
+    if status_code is None:
+        return "Unknown"
+
+    if 200 <= status_code < 300:
+        return "Working"
+
+    if status_code in (401, 403):
+        return "Access restricted"
+
+    if status_code == 404:
+        return "Not found"
+
+    if status_code == 429:
+        return "Rate limited"
+
+    if 500 <= status_code < 600:
+        return "Server error"
+
+    if 300 <= status_code < 400:
+        return "Redirect"
+
+    return f"HTTP {status_code}"
 
 
 def count_registered_domain_changes(
@@ -607,15 +657,14 @@ def count_registered_domain_changes(
             not domains
             or domain != domains[-1]
         ):
-            domains.append(domain)
+            domains.append(
+                domain
+            )
 
-    if len(domains) <= 1:
-        return 0, domains
-
-    return (
-        len(domains) - 1,
-        domains
-    )
+    return max(
+        0,
+        len(domains) - 1
+    ), domains
 
 
 # ------------------------------------------------------------
@@ -669,9 +718,9 @@ def get_rdap_information(domain):
                             len(field) >= 4
                             and field[0] == "fn"
                         ):
-                            result["registrar"] = (
-                                field[3]
-                            )
+                            result[
+                                "registrar"
+                            ] = field[3]
 
                             break
 
@@ -709,12 +758,11 @@ def get_rdap_information(domain):
                         created
                     )
 
-                    now = datetime.now(
-                        timezone.utc
-                    )
-
                     result["age_days"] = (
-                        now - created
+                        datetime.now(
+                            timezone.utc
+                        )
+                        - created
                     ).days
 
                     break
@@ -726,7 +774,7 @@ def get_rdap_information(domain):
 
 
 # ------------------------------------------------------------
-# HTTPS CERTIFICATE
+# TLS CERTIFICATE
 # ------------------------------------------------------------
 
 def get_tls_information(hostname):
@@ -764,10 +812,7 @@ def get_tls_information(hostname):
 
                     for key, value in group:
 
-                        if (
-                            key
-                            == "organizationName"
-                        ):
+                        if key == "organizationName":
                             issuer_names.append(
                                 value
                             )
@@ -793,333 +838,79 @@ def get_tls_information(hostname):
 
 
 # ------------------------------------------------------------
-# BRAND AND LOOKALIKE CHECKS
+# REPUTATION SOURCES
 # ------------------------------------------------------------
 
-def is_official_brand_domain(
-    brand,
-    registered_domain
-):
-    official_domains = KNOWN_BRANDS.get(
-        brand,
-        []
-    )
-
-    return (
-        registered_domain.lower()
-        in official_domains
-    )
-
-
-def simple_edit_distance(
-    first,
-    second
-):
-    rows = len(first) + 1
-    columns = len(second) + 1
-
-    table = []
-
-    for row in range(rows):
-        table.append(
-            [0] * columns
-        )
-
-    for row in range(rows):
-        table[row][0] = row
-
-    for column in range(columns):
-        table[0][column] = column
-
-    for row in range(
-        1,
-        rows
-    ):
-        for column in range(
-            1,
-            columns
-        ):
-
-            cost = 0
-
-            if (
-                first[row - 1]
-                != second[column - 1]
-            ):
-                cost = 1
-
-            table[row][column] = min(
-                table[row - 1][column] + 1,
-                table[row][column - 1] + 1,
-                table[row - 1][column - 1]
-                + cost
-            )
-
-    return table[-1][-1]
-
-
-def normalise_lookalike_text(value):
-    value = value.lower()
-
-    replacements = {
-        "0": "o",
-        "1": "l",
-        "3": "e",
-        "4": "a",
-        "5": "s",
-        "7": "t"
-    }
-
-    for old, new in (
-        replacements.items()
-    ):
-        value = value.replace(
-            old,
-            new
-        )
-
-    return value
-
-
-def detect_lookalike_domain(
-    registered_domain
-):
-    domain_name = get_domain_name_only(
-        registered_domain
-    )
-
-    if not domain_name:
-        return None
-
-    normalised = (
-        normalise_lookalike_text(
-            domain_name
-        )
-    )
-
-    for brand in KNOWN_BRANDS:
-
-        if is_official_brand_domain(
-            brand,
-            registered_domain
-        ):
-            continue
-
-        normal_brand = (
-            normalise_lookalike_text(
-                brand
-            )
-        )
-
-        if normalised == normal_brand:
-            return brand
-
-        if (
-            brand in domain_name
-            and domain_name != brand
-        ):
-            return brand
-
-        if len(brand) >= 5:
-
-            distance = simple_edit_distance(
-                normalised,
-                normal_brand
-            )
-
-            similarity = SequenceMatcher(
-                None,
-                normalised,
-                normal_brand
-            ).ratio()
-
-            if distance == 1:
-                return brand
-
-            if similarity >= 0.88:
-                return brand
-
-    return None
-
-
-def detect_claimed_brand(
-    hostname,
-    page
-):
-    """
-    Only use strong page identity signals.
-    Normal social links are ignored.
-    """
-
-    hostname_lower = (
-        hostname.lower()
-    )
-
-    title = (
-        page.get("title", "")
-        or ""
-    ).lower()
-
-    site_name = (
-        page.get("site_name", "")
-        or ""
-    ).lower()
-
-    heading = (
-        page.get("heading", "")
-        or ""
-    ).lower()
-
-    password_field = page.get(
-        "password_field",
-        False
-    )
-
-    for brand in KNOWN_BRANDS:
-
-        if brand in hostname_lower:
-            return brand
-
-        if (
-            brand in site_name
-            and site_name.strip()
-        ):
-            return brand
-
-        phrases = [
-            f"{brand} login",
-            f"{brand} sign in",
-            f"sign in to {brand}",
-            f"log in to {brand}",
-            f"{brand} account",
-            f"{brand} verification",
-            f"{brand} security"
-        ]
-
-        combined = (
-            title
-            + " "
-            + heading
-        )
-
-        for phrase in phrases:
-            if phrase in combined:
-                return brand
-
-        if password_field:
-            if (
-                brand in title
-                or brand in heading
-            ):
-                return brand
-
-    return None
-
-
-# ------------------------------------------------------------
-# URL STRUCTURE
-# ------------------------------------------------------------
-
-def get_url_structure_findings(url):
-    findings = []
-
-    parsed = urlparse(url)
-    hostname = parsed.hostname or ""
-
-    if parsed.username or parsed.password:
-        findings.append((
-            20,
-            "The URL contains username or password information before the hostname."
-        ))
-
-    if (
-        hostname.startswith("xn--")
-        or ".xn--" in hostname
-    ):
-        findings.append((
-            22,
-            "The domain uses punycode, which can be used for lookalike domain names."
-        ))
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_openphish_feed():
+    if not USE_OPENPHISH:
+        return set()
 
     try:
-        ip_address(hostname)
+        response = requests.get(
+            OPENPHISH_FEED,
+            timeout=15,
+            headers={
+                "User-Agent": "YetiCheck/1.0"
+            }
+        )
 
-        findings.append((
-            20,
-            "The website uses an IP address instead of a normal domain name."
-        ))
+        if response.status_code != 200:
+            return set()
 
-    except ValueError:
-        pass
+        return {
+            line.strip()
+            for line in response.text.splitlines()
+            if line.strip()
+        }
 
-    extracted = tldextract.extract(
-        hostname
-    )
-
-    if extracted.subdomain:
-
-        parts = [
-            part
-            for part
-            in extracted.subdomain.split(".")
-            if part
-        ]
-
-        if len(parts) >= 4:
-            findings.append((
-                7,
-                "The address uses an unusually deep subdomain structure."
-            ))
-
-    try:
-        port = parsed.port
-
-        if (
-            port
-            and port not in (
-                80,
-                443
-            )
-        ):
-            findings.append((
-                5,
-                f"The website uses the non-standard port {port}."
-            ))
-
-    except ValueError:
-        pass
-
-    if url.count("%") >= 5:
-        findings.append((
-            5,
-            "The URL contains a large amount of encoded text."
-        ))
-
-    if len(url) > 220:
-        findings.append((
-            4,
-            "The URL is unusually long."
-        ))
-
-    return findings
+    except Exception:
+        return set()
 
 
-# ------------------------------------------------------------
-# OPTIONAL FREE REPUTATION CHECK
-# ------------------------------------------------------------
-
-def check_phishtank(url):
-    """
-    PhishTank allows URL checks without requiring a paid account.
-    If the service is unavailable, Yeti simply continues.
-    """
-
+def check_openphish(url):
     result = {
         "checked": False,
         "confirmed": False
     }
 
-    if not USE_EXTERNAL_REPUTATION:
+    if not USE_OPENPHISH:
+        return result
+
+    try:
+        feed = get_openphish_feed()
+
+        if not feed:
+            return result
+
+        result["checked"] = True
+
+        # Check exact URL first.
+        if url in feed:
+            result["confirmed"] = True
+            return result
+
+        # Also compare URLs without a trailing slash.
+        clean = url.rstrip("/")
+
+        for item in feed:
+            if item.rstrip("/") == clean:
+                result["confirmed"] = True
+                break
+
+    except Exception:
+        pass
+
+    return result
+
+
+def check_phishtank(url):
+    result = {
+        "checked": False,
+        "confirmed": False
+    }
+
+    if not USE_PHISHTANK:
         return result
 
     try:
@@ -1193,7 +984,326 @@ def check_phishtank(url):
 
 
 # ------------------------------------------------------------
-# BROWSER PREVIEW
+# LOOKALIKE / BRAND CHECKS
+# ------------------------------------------------------------
+
+def is_official_brand_domain(
+    brand,
+    registered_domain
+):
+    return (
+        registered_domain.lower()
+        in KNOWN_BRANDS.get(
+            brand,
+            []
+        )
+    )
+
+
+def simple_edit_distance(
+    first,
+    second
+):
+    rows = len(first) + 1
+    columns = len(second) + 1
+
+    table = [
+        [0] * columns
+        for _ in range(rows)
+    ]
+
+    for row in range(rows):
+        table[row][0] = row
+
+    for column in range(columns):
+        table[0][column] = column
+
+    for row in range(
+        1,
+        rows
+    ):
+
+        for column in range(
+            1,
+            columns
+        ):
+
+            cost = (
+                0
+                if first[row - 1]
+                == second[column - 1]
+                else 1
+            )
+
+            table[row][column] = min(
+                table[row - 1][column] + 1,
+                table[row][column - 1] + 1,
+                table[row - 1][column - 1]
+                + cost
+            )
+
+    return table[-1][-1]
+
+
+def normalise_lookalike_text(value):
+    replacements = {
+        "0": "o",
+        "1": "l",
+        "3": "e",
+        "4": "a",
+        "5": "s",
+        "7": "t"
+    }
+
+    value = value.lower()
+
+    for old, new in replacements.items():
+        value = value.replace(
+            old,
+            new
+        )
+
+    return value
+
+
+def detect_lookalike_domain(
+    registered_domain
+):
+    domain_name = get_domain_name_only(
+        registered_domain
+    )
+
+    if not domain_name:
+        return None
+
+    normalised = normalise_lookalike_text(
+        domain_name
+    )
+
+    for brand in KNOWN_BRANDS:
+
+        if is_official_brand_domain(
+            brand,
+            registered_domain
+        ):
+            continue
+
+        normal_brand = (
+            normalise_lookalike_text(
+                brand
+            )
+        )
+
+        if normalised == normal_brand:
+            return brand
+
+        if (
+            brand in domain_name
+            and domain_name != brand
+        ):
+            return brand
+
+        if len(brand) >= 5:
+
+            distance = simple_edit_distance(
+                normalised,
+                normal_brand
+            )
+
+            similarity = SequenceMatcher(
+                None,
+                normalised,
+                normal_brand
+            ).ratio()
+
+            if (
+                distance == 1
+                or similarity >= 0.88
+            ):
+                return brand
+
+    return None
+
+
+def detect_claimed_brand(
+    hostname,
+    page
+):
+    hostname_lower = (
+        hostname.lower()
+    )
+
+    title = (
+        page.get(
+            "title",
+            ""
+        )
+        or ""
+    ).lower()
+
+    site_name = (
+        page.get(
+            "site_name",
+            ""
+        )
+        or ""
+    ).lower()
+
+    heading = (
+        page.get(
+            "heading",
+            ""
+        )
+        or ""
+    ).lower()
+
+    password_field = page.get(
+        "password_field",
+        False
+    )
+
+    for brand in KNOWN_BRANDS:
+
+        if brand in hostname_lower:
+            return brand
+
+        if (
+            brand in site_name
+            and site_name.strip()
+        ):
+            return brand
+
+        phrases = [
+            f"{brand} login",
+            f"{brand} sign in",
+            f"sign in to {brand}",
+            f"log in to {brand}",
+            f"{brand} account",
+            f"{brand} verification",
+            f"{brand} security"
+        ]
+
+        combined = (
+            title
+            + " "
+            + heading
+        )
+
+        if any(
+            phrase in combined
+            for phrase in phrases
+        ):
+            return brand
+
+        if (
+            password_field
+            and (
+                brand in title
+                or brand in heading
+            )
+        ):
+            return brand
+
+    return None
+
+
+# ------------------------------------------------------------
+# URL STRUCTURE
+# ------------------------------------------------------------
+
+def get_url_structure_findings(url):
+    findings = []
+
+    parsed = urlparse(
+        url
+    )
+
+    hostname = (
+        parsed.hostname
+        or ""
+    )
+
+    registered_domain = (
+        get_registered_domain(
+            hostname
+        )
+    )
+
+    if registered_domain in SHORTENERS:
+        findings.append((
+            5,
+            "The address uses a URL shortening service."
+        ))
+
+    if (
+        parsed.username
+        or parsed.password
+    ):
+        findings.append((
+            20,
+            "The URL contains information before the hostname that may hide the real destination."
+        ))
+
+    if (
+        hostname.startswith(
+            "xn--"
+        )
+        or ".xn--" in hostname
+    ):
+        findings.append((
+            22,
+            "The domain uses punycode, which can be used for lookalike domain names."
+        ))
+
+    try:
+        ip_address(
+            hostname
+        )
+
+        findings.append((
+            20,
+            "The website uses an IP address instead of a normal domain name."
+        ))
+
+    except ValueError:
+        pass
+
+    extracted = tldextract.extract(
+        hostname
+    )
+
+    if extracted.subdomain:
+
+        parts = [
+            item
+            for item
+            in extracted.subdomain.split(".")
+            if item
+        ]
+
+        if len(parts) >= 4:
+            findings.append((
+                7,
+                "The address uses an unusually deep subdomain structure."
+            ))
+
+    if url.count("%") >= 5:
+        findings.append((
+            5,
+            "The URL contains a large amount of encoded text."
+        ))
+
+    if len(url) > 220:
+        findings.append((
+            4,
+            "The URL is unusually long."
+        ))
+
+    return findings
+
+
+# ------------------------------------------------------------
+# BROWSER CHECK
 # ------------------------------------------------------------
 
 def get_browser_path():
@@ -1220,11 +1330,9 @@ def inspect_page(browser_url):
         "forms": [],
         "screenshot": None,
         "preview_status": "unknown",
-        "preview_message": "",
-        "browser_final_url": browser_url
+        "preview_message": ""
     }
 
-    # Give each URL its own screenshot file.
     file_id = hashlib.sha256(
         browser_url.encode(
             "utf-8",
@@ -1274,7 +1382,6 @@ def inspect_page(browser_url):
                     "Chrome/131.0.0.0 Safari/537.36"
                 ),
                 locale="en-GB",
-                timezone_id="Europe/London",
                 extra_http_headers={
                     "Accept-Language": (
                         "en-GB,en;q=0.9"
@@ -1296,10 +1403,6 @@ def inspect_page(browser_url):
                 )
             except Exception:
                 pass
-
-            result[
-                "browser_final_url"
-            ] = page.url
 
             try:
                 result["title"] = (
@@ -1421,17 +1524,13 @@ def inspect_page(browser_url):
                 pass
 
             try:
-                email_selector = (
-                    'input[type="email"], '
-                    'input[name*="email" i], '
-                    'input[name*="user" i]'
-                )
-
                 result[
                     "email_field"
                 ] = (
                     page.locator(
-                        email_selector
+                        'input[type="email"], '
+                        'input[name*="email" i], '
+                        'input[name*="user" i]'
                     ).count() > 0
                 )
             except Exception:
@@ -1442,17 +1541,16 @@ def inspect_page(browser_url):
                     "form"
                 )
 
-                count = min(
-                    forms.count(),
-                    20
-                )
-
-                for i in range(count):
-
-                    form = forms.nth(i)
+                for i in range(
+                    min(
+                        forms.count(),
+                        20
+                    )
+                ):
 
                     action = (
-                        form.get_attribute(
+                        forms.nth(i)
+                        .get_attribute(
                             "action"
                         )
                         or ""
@@ -1506,11 +1604,11 @@ def inspect_page(browser_url):
 
 
 # ------------------------------------------------------------
-# KNOWN EXTERNAL AUTH SERVICES
+# FORM DESTINATION HELPERS
 # ------------------------------------------------------------
 
 def is_known_auth_service(domain):
-    known_services = {
+    return domain.lower() in {
         "microsoftonline.com",
         "live.com",
         "google.com",
@@ -1520,14 +1618,9 @@ def is_known_auth_service(domain):
         "paypal.com"
     }
 
-    return (
-        domain.lower()
-        in known_services
-    )
-
 
 # ------------------------------------------------------------
-# MAIN ANALYSIS
+# ANALYSIS
 # ------------------------------------------------------------
 
 def analyse_url(url):
@@ -1536,6 +1629,10 @@ def analyse_url(url):
         "score": 0,
         "reasons": [],
         "final_url": url,
+        "status_code": None,
+        "site_status": "Unknown",
+        "content_type": "Unknown",
+        "server": "Unknown",
         "redirects": [],
         "hostname": "",
         "registered_domain": "",
@@ -1543,22 +1640,53 @@ def analyse_url(url):
         "rdap": {},
         "tls": {},
         "page": {},
-        "brand": None,
-        "lookalike_brand": None,
-        "redirect_domains": [],
-        "reputation": {
-            "checked": False,
-            "confirmed": False
-        }
+        "phish_tank": {},
+        "openphish": {}
     }
 
-    # 1. Redirects and final destination
+    # --------------------------------------------------------
+    # 1. Request and final destination
+    # --------------------------------------------------------
+
     response, final_url, redirects = (
-        safe_request(url)
+        safe_request(
+            url
+        )
     )
 
-    result["final_url"] = final_url
-    result["redirects"] = redirects
+    result["final_url"] = (
+        final_url
+    )
+
+    result["redirects"] = (
+        redirects
+    )
+
+    if response is not None:
+
+        result["status_code"] = (
+            response.status_code
+        )
+
+        result["site_status"] = (
+            classify_http_status(
+                response.status_code
+            )
+        )
+
+        result["content_type"] = (
+            response.headers.get(
+                "Content-Type",
+                "Unknown"
+            )
+        )
+
+        result["server"] = (
+            response.headers.get(
+                "Server",
+                "Unknown"
+            )
+        )
 
     hostname = get_hostname(
         final_url
@@ -1570,7 +1698,10 @@ def analyse_url(url):
         )
     )
 
-    result["hostname"] = hostname
+    result["hostname"] = (
+        hostname
+    )
+
     result[
         "registered_domain"
     ] = registered_domain
@@ -1582,38 +1713,63 @@ def analyse_url(url):
     )
 
 
-    # 2. Free reputation check
-    result["reputation"] = (
+    # --------------------------------------------------------
+    # 2. Reputation databases
+    # --------------------------------------------------------
+
+    result["phish_tank"] = (
         check_phishtank(
             final_url
         )
     )
 
+    result["openphish"] = (
+        check_openphish(
+            final_url
+        )
+    )
+
     if result[
-        "reputation"
+        "phish_tank"
     ].get("confirmed"):
 
         result["score"] += 75
 
         result["reasons"].append(
-            "This address appears in a verified phishing database."
+            "The address appears in the PhishTank verified phishing database."
+        )
+
+    if result[
+        "openphish"
+    ].get("confirmed"):
+
+        result["score"] += 75
+
+        result["reasons"].append(
+            "The address appears in the OpenPhish community phishing feed."
         )
 
 
-    # 3. Domain age
+    # --------------------------------------------------------
+    # 3. Domain registration
+    # --------------------------------------------------------
+
     result["rdap"] = (
         get_rdap_information(
             registered_domain
         )
     )
 
-    age = result["rdap"].get(
+    age = result[
+        "rdap"
+    ].get(
         "age_days"
     )
 
     if age is not None:
 
         if age < 7:
+
             result["score"] += 20
 
             result["reasons"].append(
@@ -1621,6 +1777,7 @@ def analyse_url(url):
             )
 
         elif age < 30:
+
             result["score"] += 12
 
             result["reasons"].append(
@@ -1628,6 +1785,7 @@ def analyse_url(url):
             )
 
         elif age < 90:
+
             result["score"] += 5
 
             result["reasons"].append(
@@ -1635,7 +1793,10 @@ def analyse_url(url):
             )
 
 
-    # 4. HTTPS certificate
+    # --------------------------------------------------------
+    # 4. HTTPS
+    # --------------------------------------------------------
+
     if final_url.startswith(
         "https://"
     ):
@@ -1646,9 +1807,12 @@ def analyse_url(url):
             )
         )
 
-        if not result["tls"].get(
+        if not result[
+            "tls"
+        ].get(
             "valid"
         ):
+
             result["score"] += 18
 
             result["reasons"].append(
@@ -1670,20 +1834,29 @@ def analyse_url(url):
         )
 
 
+    # --------------------------------------------------------
     # 5. URL structure
+    # --------------------------------------------------------
+
     for points, reason in (
         get_url_structure_findings(
             final_url
         )
     ):
 
-        result["score"] += points
+        result["score"] += (
+            points
+        )
+
         result["reasons"].append(
             reason
         )
 
 
-    # 6. Redirect domain changes
+    # --------------------------------------------------------
+    # 6. Redirect changes
+    # --------------------------------------------------------
+
     changes, domains = (
         count_registered_domain_changes(
             url,
@@ -1691,10 +1864,6 @@ def analyse_url(url):
             final_url
         )
     )
-
-    result[
-        "redirect_domains"
-    ] = domains
 
     if changes == 1:
 
@@ -1713,16 +1882,15 @@ def analyse_url(url):
         )
 
 
+    # --------------------------------------------------------
     # 7. Lookalike domain
+    # --------------------------------------------------------
+
     lookalike = (
         detect_lookalike_domain(
             registered_domain
         )
     )
-
-    result[
-        "lookalike_brand"
-    ] = lookalike
 
     if lookalike:
 
@@ -1734,9 +1902,14 @@ def analyse_url(url):
         )
 
 
-    # 8. Browser page checks
-    result["page"] = inspect_page(
-        url
+    # --------------------------------------------------------
+    # 8. Page and form checks
+    # --------------------------------------------------------
+
+    result["page"] = (
+        inspect_page(
+            url
+        )
     )
 
     preview_ok = (
@@ -1746,10 +1919,6 @@ def analyse_url(url):
         == "success"
     )
 
-
-    # 9. Brand identity
-    brand = None
-
     if preview_ok:
 
         brand = detect_claimed_brand(
@@ -1757,26 +1926,20 @@ def analyse_url(url):
             result["page"]
         )
 
-    result["brand"] = brand
+        if (
+            brand
+            and not is_official_brand_domain(
+                brand,
+                registered_domain
+            )
+        ):
 
-    if (
-        brand
-        and not is_official_brand_domain(
-            brand,
-            registered_domain
-        )
-    ):
+            result["score"] += 40
 
-        result["score"] += 40
-
-        result["reasons"].append(
-            f"The page appears to identify as {brand.title()}, "
-            f"but the registered domain is {registered_domain}."
-        )
-
-
-    # 10. Forms
-    if preview_ok:
+            result["reasons"].append(
+                f"The page appears to identify as {brand.title()}, "
+                f"but the registered domain is {registered_domain}."
+            )
 
         password_field = (
             result["page"].get(
@@ -1793,11 +1956,11 @@ def analyse_url(url):
                 "The page contains a password field."
             )
 
-        for action in (
-            result["page"].get(
-                "forms",
-                []
-            )
+        for action in result[
+            "page"
+        ].get(
+            "forms",
+            []
         ):
 
             if not action:
@@ -1842,7 +2005,31 @@ def analyse_url(url):
                 break
 
 
-    # 11. Final result
+    # --------------------------------------------------------
+    # 9. Availability result
+    # --------------------------------------------------------
+
+    # A dead site is not the same as phishing.
+    if result["status_code"] == 404:
+
+        result["reasons"].append(
+            "The page returned HTTP 404 and appears not to exist."
+        )
+
+    elif (
+        result["status_code"] is not None
+        and 500 <= result["status_code"] < 600
+    ):
+
+        result["reasons"].append(
+            "The website returned a server error."
+        )
+
+
+    # --------------------------------------------------------
+    # 10. Verdict
+    # --------------------------------------------------------
+
     result["score"] = min(
         result["score"],
         100
@@ -1872,16 +2059,14 @@ def analyse_url(url):
 
 
 # ------------------------------------------------------------
-# SIMPLE SUMMARY HELPERS
+# REPORT HELPERS
 # ------------------------------------------------------------
 
 def main_reason(result):
-    if result["reasons"]:
+    if result.get("reasons"):
         return result["reasons"][0]
 
-    return (
-        "No major phishing indicators were found."
-    )
+    return "No major phishing indicators were found."
 
 
 def create_text_report(results):
@@ -1897,7 +2082,7 @@ def create_text_report(results):
         )
 
         lines.append(
-            f"Final URL: {result['final_url']}"
+            f"Final URL: {result.get('final_url', result['url'])}"
         )
 
         lines.append(
@@ -1905,23 +2090,39 @@ def create_text_report(results):
         )
 
         lines.append(
-            f"Risk score: {result['score']}/100"
+            f"Risk score: {result.get('score', 0)}/100"
+        )
+
+        lines.append(
+            f"Website status: {result.get('site_status', 'Unknown')}"
+        )
+
+        lines.append(
+            f"HTTP status: {result.get('status_code', 'Unknown')}"
+        )
+
+        lines.append(
+            f"Domain: {result.get('registered_domain', 'Unknown')}"
         )
 
         lines.append(
             "Findings:"
         )
 
-        if result["reasons"]:
+        if result.get(
+            "reasons"
+        ):
 
-            for reason in (
-                result["reasons"]
-            ):
+            for reason in result[
+                "reasons"
+            ]:
+
                 lines.append(
                     f"- {reason}"
                 )
 
         else:
+
             lines.append(
                 "- No major phishing indicators were found."
             )
@@ -1930,7 +2131,9 @@ def create_text_report(results):
         lines.append("-" * 50)
         lines.append("")
 
-    return "\n".join(lines)
+    return "\n".join(
+        lines
+    )
 
 
 # ------------------------------------------------------------
@@ -1962,12 +2165,14 @@ with st.form(
         ],
         help=(
             "Optional. Upload a QR code image and "
-            "Yeti will read the hidden link."
+            "Yeti will check the hidden link."
         )
     )
 
-    submitted = st.form_submit_button(
-        "Check"
+    submitted = (
+        st.form_submit_button(
+            "Check"
+        )
     )
 
 
@@ -1981,28 +2186,30 @@ if submitted:
         pasted_text
     )
 
-    qr_values = decode_qr_codes(
+    for value in decode_qr_codes(
         qr_file
-    )
-
-    for value in qr_values:
+    ):
 
         qr_urls = extract_urls_from_text(
             value
         )
 
-        # Some QR codes contain only the URL with no extra text.
         if (
             not qr_urls
             and "." in value
         ):
             qr_urls = [
-                clean_url(value)
+                clean_url(
+                    value
+                )
             ]
 
         for item in qr_urls:
+
             if item not in urls:
-                urls.append(item)
+                urls.append(
+                    item
+                )
 
 
     if not urls:
@@ -2011,17 +2218,20 @@ if submitted:
             qr_file is not None
             and not QR_SUPPORT
         ):
+
             st.error(
                 "QR reading is not available. "
-                "Add opencv-python-headless and numpy to requirements.txt."
+                "Check the requirements.txt file."
             )
 
         elif qr_file is not None:
+
             st.warning(
                 "No website link could be read from the QR code."
             )
 
         else:
+
             st.warning(
                 "No website links were found."
             )
@@ -2055,7 +2265,7 @@ if submitted:
     ):
 
         status.write(
-            f"Checking {index} of {len(urls)}: {url}"
+            f"Checking {index} of {len(urls)}"
         )
 
         try:
@@ -2071,24 +2281,23 @@ if submitted:
                 "final_url": url,
                 "verdict": "Unable to Check",
                 "score": 0,
+                "site_status": "Unable to connect",
+                "status_code": None,
                 "registered_domain": (
                     get_registered_domain(
-                        get_hostname(url)
+                        get_hostname(
+                            url
+                        )
                     )
                 ),
                 "reasons": [
                     str(error)
                 ],
-                "redirects": [],
-                "redirect_domains": [],
-                "ip_addresses": [],
                 "rdap": {},
                 "tls": {},
                 "page": {},
-                "reputation": {
-                    "checked": False,
-                    "confirmed": False
-                }
+                "phish_tank": {},
+                "openphish": {}
             }
 
         results.append(
@@ -2104,44 +2313,38 @@ if submitted:
 
 
     # --------------------------------------------------------
-    # OVERALL SUMMARY
+    # SUMMARY
     # --------------------------------------------------------
 
     high_count = sum(
-        1
-        for item in results
-        if item["verdict"]
+        item["verdict"]
         == "High Risk"
+        for item in results
     )
 
     suspicious_count = sum(
-        1
-        for item in results
-        if item["verdict"]
+        item["verdict"]
         == "Suspicious"
+        for item in results
     )
 
     caution_count = sum(
-        1
-        for item in results
-        if item["verdict"]
+        item["verdict"]
         == "Caution"
+        for item in results
     )
 
     low_count = sum(
-        1
-        for item in results
-        if item["verdict"]
+        item["verdict"]
         == "Low Risk"
+        for item in results
     )
 
     st.markdown(
         f"""
         <div class="result-box">
             <div class="result-title">Check complete</div>
-            <div class="muted">
-                {len(results)} link(s) checked
-            </div>
+            <div class="muted">{len(results)} link(s) checked</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -2177,14 +2380,9 @@ if submitted:
 
 
     # --------------------------------------------------------
-    # RESULT LIST
+    # RESULTS
     # --------------------------------------------------------
 
-    st.subheader(
-        "Results"
-    )
-
-    # Put the most important results first.
     order = {
         "High Risk": 0,
         "Suspicious": 1,
@@ -2193,7 +2391,7 @@ if submitted:
         "Low Risk": 4
     }
 
-    sorted_results = sorted(
+    results = sorted(
         results,
         key=lambda item: (
             order.get(
@@ -2207,7 +2405,11 @@ if submitted:
         )
     )
 
-    for result in sorted_results:
+    st.subheader(
+        "Results"
+    )
+
+    for result in results:
 
         domain = (
             result.get(
@@ -2219,12 +2421,12 @@ if submitted:
         st.markdown(
             f"""
             <div class="result-box">
-                <div class="result-title">
-                    {domain}
-                </div>
+                <div class="result-title">{domain}</div>
                 <div class="muted">
                     {result["verdict"]} &nbsp; | &nbsp;
                     Risk score: {result.get("score", 0)}/100
+                    &nbsp; | &nbsp;
+                    {result.get("site_status", "Unknown")}
                 </div>
                 <div style="margin-top:0.5rem;">
                     {main_reason(result)}
@@ -2237,6 +2439,48 @@ if submitted:
         with st.expander(
             f"Details for {domain}"
         ):
+
+            col_a, col_b, col_c = (
+                st.columns(3)
+            )
+
+            with col_a:
+                st.metric(
+                    "Website status",
+                    result.get(
+                        "site_status",
+                        "Unknown"
+                    )
+                )
+
+            with col_b:
+                st.metric(
+                    "HTTP",
+                    (
+                        result.get(
+                            "status_code"
+                        )
+                        if result.get(
+                            "status_code"
+                        ) is not None
+                        else "Unknown"
+                    )
+                )
+
+            with col_c:
+                st.metric(
+                    "HTTPS",
+                    (
+                        "Valid"
+                        if result.get(
+                            "tls",
+                            {}
+                        ).get(
+                            "valid"
+                        )
+                        else "Not validated"
+                    )
+                )
 
             st.write(
                 "Original address:",
@@ -2268,42 +2512,75 @@ if submitted:
             )
 
             st.write(
-                "HTTPS certificate:",
-                (
-                    "Valid"
-                    if result.get(
-                        "tls",
-                        {}
-                    ).get(
-                        "valid"
-                    )
-                    else "Not validated"
+                "Registrar:",
+                result.get(
+                    "rdap",
+                    {}
+                ).get(
+                    "registrar",
+                    "Unknown"
                 )
             )
 
-            reputation = result.get(
-                "reputation",
+            st.write(
+                "Content type:",
+                result.get(
+                    "content_type",
+                    "Unknown"
+                )
+            )
+
+            st.write(
+                "Server:",
+                result.get(
+                    "server",
+                    "Unknown"
+                )
+            )
+
+            phishtank = result.get(
+                "phish_tank",
                 {}
             )
 
-            if reputation.get(
-                "checked"
-            ):
-                st.write(
-                    "Phishing database:",
-                    (
-                        "Verified match"
-                        if reputation.get(
-                            "confirmed"
+            openphish = result.get(
+                "openphish",
+                {}
+            )
+
+            st.write(
+                "PhishTank:",
+                (
+                    "Verified phishing match"
+                    if phishtank.get(
+                        "confirmed"
+                    )
+                    else (
+                        "No verified match"
+                        if phishtank.get(
+                            "checked"
                         )
-                        else "No verified match found"
+                        else "Check unavailable"
                     )
                 )
-            else:
-                st.write(
-                    "Phishing database:",
-                    "Check unavailable"
+            )
+
+            st.write(
+                "OpenPhish:",
+                (
+                    "Listed in community feed"
+                    if openphish.get(
+                        "confirmed"
+                    )
+                    else (
+                        "No match found"
+                        if openphish.get(
+                            "checked"
+                        )
+                        else "Check unavailable"
+                    )
                 )
+            )
 
             st.write(
                 "Findings:"
@@ -2315,12 +2592,14 @@ if submitted:
 
                 for reason in result[
                     "reasons"
-                ]:
+                ][:8]:
+
                     st.write(
                         reason
                     )
 
             else:
+
                 st.write(
                     "No major phishing indicators were found."
                 )
@@ -2332,11 +2611,15 @@ if submitted:
 
             if preview.get(
                 "preview_status"
-            ) == "blocked":
+            ) in (
+                "blocked",
+                "failed"
+            ):
 
                 st.info(
                     preview.get(
-                        "preview_message"
+                        "preview_message",
+                        "Preview unavailable."
                     )
                 )
 
@@ -2350,6 +2633,7 @@ if submitted:
                     screenshot
                 )
             ):
+
                 st.image(
                     screenshot,
                     use_container_width=True
@@ -2357,11 +2641,11 @@ if submitted:
 
 
     # --------------------------------------------------------
-    # REPORT
+    # REPORT AND RESET
     # --------------------------------------------------------
 
     report = create_text_report(
-        sorted_results
+        results
     )
 
     st.download_button(
@@ -2371,15 +2655,11 @@ if submitted:
         mime="text/plain"
     )
 
-
-    # --------------------------------------------------------
-    # RESET
-    # --------------------------------------------------------
-
     if st.button(
         "Reset",
         key="reset_button"
     ):
+
         st.session_state[
             "yeti_text"
         ] = ""
