@@ -793,7 +793,7 @@ def inspect_page(browser_url):
             except Exception:
                 pass
 
-            check_text = (
+            page_text = (
                 (result["title"] or "")
                 + " "
                 + (body_text or "")
@@ -807,7 +807,7 @@ def inspect_page(browser_url):
             ]
 
             blocked = any(
-                phrase in check_text
+                phrase in page_text
                 for phrase in blocked_phrases
             )
 
@@ -821,9 +821,9 @@ def inspect_page(browser_url):
             if blocked:
                 result["preview_status"] = "blocked"
                 result["preview_message"] = (
-                    "The website blocked Yeti Check's automated browser. "
-                    "This can happen on legitimate websites that use bot protection "
-                    "and is not treated as evidence of phishing."
+                    "The website blocked Yeti Check's automated preview. "
+                    "This can happen on legitimate websites that use bot protection. "
+                    "It is not counted as evidence of phishing."
                 )
 
                 try:
@@ -893,19 +893,11 @@ def inspect_page(browser_url):
 
             try:
                 forms = page.locator("form")
-
-                count = min(
-                    forms.count(),
-                    20
-                )
+                count = min(forms.count(), 20)
 
                 for i in range(count):
                     form = forms.nth(i)
-
-                    action = (
-                        form.get_attribute("action")
-                        or ""
-                    )
+                    action = form.get_attribute("action") or ""
 
                     if action:
                         action = requests.compat.urljoin(
@@ -923,9 +915,7 @@ def inspect_page(browser_url):
                     path=screenshot_path,
                     full_page=True
                 )
-
                 result["screenshot"] = screenshot_path
-
             except Exception:
                 pass
 
@@ -936,10 +926,223 @@ def inspect_page(browser_url):
         result["preview_status"] = "failed"
         result["preview_message"] = (
             "Yeti Check could not open the website preview. "
-            "The rest of the domain and security checks can still be used."
+            "The domain, certificate and reputation checks can still be used."
         )
 
     return result
+
+
+def analyse_url(url):
+    result = {
+        "score": 0,
+        "reasons": [],
+        "final_url": url,
+        "redirects": [],
+        "hostname": "",
+        "registered_domain": "",
+        "ip_addresses": [],
+        "rdap": {},
+        "tls": {},
+        "page": {},
+        "phishing_database": {},
+        "brand": None,
+        "lookalike_brand": None
+    }
+
+    response, final_url, redirects = safe_request(url)
+
+    result["final_url"] = final_url
+    result["redirects"] = redirects
+
+    hostname = get_hostname(final_url)
+    registered_domain = get_registered_domain(hostname)
+
+    result["hostname"] = hostname
+    result["registered_domain"] = registered_domain
+    result["ip_addresses"] = resolve_ip(hostname)
+
+    # Reputation check. A positive match is strong evidence.
+    # No match does not mean the website is safe.
+    result["phishing_database"] = check_phishtank(final_url)
+    phishing = result["phishing_database"]
+
+    if (
+        phishing.get("listed")
+        and phishing.get("verified")
+        and phishing.get("valid")
+    ):
+        result["score"] += 70
+        result["reasons"].append(
+            "This address is listed as a verified phishing page in PhishTank."
+        )
+
+    # Registration age. New domains are only supporting evidence.
+    result["rdap"] = get_rdap_information(registered_domain)
+    age = result["rdap"].get("age_days")
+
+    if age is not None:
+        if age < 14:
+            result["score"] += 25
+            result["reasons"].append(
+                "The domain was registered less than 14 days ago."
+            )
+        elif age < 30:
+            result["score"] += 18
+            result["reasons"].append(
+                "The domain was registered less than 30 days ago."
+            )
+        elif age < 180:
+            result["score"] += 6
+            result["reasons"].append(
+                "The domain was registered less than 6 months ago."
+            )
+
+    # HTTPS certificate.
+    if final_url.startswith("https://"):
+        result["tls"] = get_tls_information(hostname)
+    else:
+        result["tls"] = {
+            "enabled": False,
+            "valid": False,
+            "issuer": "Unknown",
+            "expires": "Unknown"
+        }
+        result["score"] += 12
+        result["reasons"].append(
+            "The final page is not using HTTPS."
+        )
+
+    # Inspect the page.
+    result["page"] = inspect_page(url)
+
+    # Strong brand identity check.
+    # Do not analyse an Access Denied / bot-block page as the real website.
+    if result["page"].get("preview_status") == "success":
+        brand = detect_claimed_brand(
+            hostname,
+            registered_domain,
+            result["page"]
+        )
+    else:
+        brand = None
+
+    result["brand"] = brand
+
+    if brand and not is_official_brand_domain(brand, registered_domain):
+        result["score"] += 40
+        result["reasons"].append(
+            f"The page appears to identify as {brand.title()}, "
+            f"but the registered domain is {registered_domain}."
+        )
+
+    # Lookalike / typo domain check.
+    lookalike = detect_lookalike_domain(registered_domain)
+    result["lookalike_brand"] = lookalike
+
+    if lookalike and lookalike != brand:
+        result["score"] += 30
+        result["reasons"].append(
+            f"The domain name looks similar to {lookalike.title()}, "
+            "but it is not one of that brand's known official domains."
+        )
+
+    # Redirects matter mainly when the registered domain changes.
+    entered_domain = get_registered_domain(get_hostname(url))
+
+    if (
+        entered_domain
+        and registered_domain
+        and entered_domain != registered_domain
+    ):
+        result["score"] += 12
+        result["reasons"].append(
+            "The link redirected to a different registered domain."
+        )
+
+    if len(redirects) >= 4:
+        result["score"] += 6
+        result["reasons"].append(
+            "The link used several redirects."
+        )
+
+    # Punycode can be used for visually similar domains.
+    if hostname.startswith("xn--") or ".xn--" in hostname:
+        result["score"] += 22
+        result["reasons"].append(
+            "The domain uses punycode, which can be used to create lookalike names."
+        )
+
+    # Direct IP URLs are unusual for normal public login pages.
+    try:
+        ip_address(hostname)
+        result["score"] += 20
+        result["reasons"].append(
+            "The website uses an IP address instead of a normal domain name."
+        )
+    except ValueError:
+        pass
+
+    # Misleading user-info syntax.
+    if "@" in final_url:
+        result["score"] += 20
+        result["reasons"].append(
+            "The URL contains an @ symbol, which can make the real destination harder to see."
+        )
+
+    # Long URLs are weak evidence only.
+    if len(final_url) > 200:
+        result["score"] += 4
+        result["reasons"].append(
+            "The URL is unusually long."
+        )
+
+    # Password fields are common on legitimate sites, so use a small weight.
+    # Only use page-content signals when the real page loaded.
+    if (
+        result["page"].get("preview_status") == "success"
+        and result["page"].get("password_field")
+    ):
+        result["score"] += 5
+        result["reasons"].append(
+            "The page contains a password field."
+        )
+
+    # Sending a form to another registered domain is a stronger warning.
+    page_forms = []
+
+    if result["page"].get("preview_status") == "success":
+        page_forms = result["page"].get("forms", [])
+
+    for action in page_forms:
+        if not action:
+            continue
+
+        form_domain = get_registered_domain(get_hostname(action))
+
+        if (
+            form_domain
+            and registered_domain
+            and form_domain != registered_domain
+        ):
+            result["score"] += 35
+            result["reasons"].append(
+                "A form on the page sends information to a different registered domain."
+            )
+            break
+
+    result["score"] = min(result["score"], 100)
+
+    if result["score"] >= 70:
+        result["verdict"] = "High Risk"
+    elif result["score"] >= 40:
+        result["verdict"] = "Suspicious"
+    elif result["score"] >= 20:
+        result["verdict"] = "Caution"
+    else:
+        result["verdict"] = "Low Risk"
+
+    return result
+
 
 # ------------------------------------------------------------
 # INPUT
@@ -1074,6 +1277,23 @@ if submitted:
     # --------------------------------------------------------
 
     screenshot = result["page"].get("screenshot")
+    preview_status = result["page"].get("preview_status")
+
+    if preview_status == "blocked":
+        st.info(
+            result["page"].get(
+                "preview_message",
+                "The website blocked the automated preview."
+            )
+        )
+
+    elif preview_status == "failed":
+        st.info(
+            result["page"].get(
+                "preview_message",
+                "The website preview could not be loaded."
+            )
+        )
 
     if screenshot and os.path.exists(screenshot):
         st.subheader("Website preview")
