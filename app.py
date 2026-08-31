@@ -114,9 +114,12 @@ PHISHTANK_APP_KEY = get_secret(
 )
 
 
-URLSCAN_API_KEY = get_secret(
-    "URLSCAN_API_KEY"
-)
+URLSCAN_API_KEY = (
+    get_secret(
+        "URLSCAN_API_KEY"
+    )
+    or ""
+).strip()
 
 HISTORY_DB_PATH = "yeti_history.db"
 
@@ -1585,16 +1588,22 @@ def check_urlscan_history(hostname):
     """
     Search EXISTING urlscan.io scans for this exact hostname.
 
-    Yeti does not automatically submit the user's URL to urlscan.
-    This keeps work URLs from being published by accident.
+    Authentication:
+        Streamlit Secrets -> URLSCAN_API_KEY
+
+    Privacy:
+        Yeti searches historical scans only.
+        It does NOT submit the user's URL for a new scan.
     """
 
     result = {
         "configured": bool(
             URLSCAN_API_KEY
         ),
+        "connected": False,
         "checked": False,
         "error": "",
+        "http_status": None,
         "total": 0,
         "recent_count": 0,
         "last_seen": None,
@@ -1609,47 +1618,85 @@ def check_urlscan_history(hostname):
     }
 
     if not URLSCAN_API_KEY:
+        result["error"] = (
+            "URLSCAN_API_KEY is not configured in Streamlit Secrets."
+        )
         return result
 
     if not hostname:
+        result["error"] = (
+            "No hostname was available for the urlscan lookup."
+        )
         return result
 
-    # Hostnames contain only a small safe character set after URL parsing.
     safe_hostname = re.sub(
         r"[^A-Za-z0-9._-]",
         "",
         hostname
+    ).strip(
+        "."
     )
 
     if not safe_hostname:
+        result["error"] = (
+            "The hostname could not be used for the urlscan lookup."
+        )
         return result
 
     try:
+        # urlscan recommends authenticated Search API requests using
+        # the API-Key/api-key HTTP header and limiting searches by date.
         response = requests.get(
             "https://urlscan.io/api/v1/search/",
             params={
                 "q": (
-                    f'page.domain.keyword:"{safe_hostname}" '
+                    f'page.domain:"{safe_hostname}" '
                     'AND date:>now-90d'
                 ),
                 "size": 10
             },
             headers={
                 "api-key": URLSCAN_API_KEY,
-                "User-Agent": "YetiCheck/1.0",
-                "Accept": "application/json"
+                "Accept": "application/json",
+                "User-Agent": "YetiCheck/1.0 by bipzilla"
             },
-            timeout=15
+            timeout=15,
+            allow_redirects=True
         )
+
+        result["http_status"] = (
+            response.status_code
+        )
+
+        if response.status_code == 401:
+            result["error"] = (
+                "urlscan.io rejected the API key. "
+                "Check URLSCAN_API_KEY in Streamlit Secrets."
+            )
+            return result
+
+        if response.status_code == 403:
+            result["error"] = (
+                "urlscan.io denied this request. "
+                "Check the API key permissions/account status."
+            )
+            return result
+
+        if response.status_code == 429:
+            result["error"] = (
+                "urlscan.io rate limit reached. Try again later."
+            )
+            return result
 
         if response.status_code != 200:
             try:
-                data = response.json()
+                payload = response.json()
+
                 message = (
-                    data.get(
+                    payload.get(
                         "message"
                     )
-                    or data.get(
+                    or payload.get(
                         "error"
                     )
                 )
@@ -1658,95 +1705,111 @@ def check_urlscan_history(hostname):
                     message,
                     dict
                 ):
-                    message = message.get(
-                        "message"
+                    message = (
+                        message.get(
+                            "message"
+                        )
+                        or str(
+                            message
+                        )
                     )
 
                 result["error"] = (
-                    str(message)
+                    str(
+                        message
+                    )
                     if message
-                    else f"HTTP {response.status_code}"
+                    else (
+                        "urlscan.io returned "
+                        f"HTTP {response.status_code}."
+                    )
                 )
 
             except Exception:
                 result["error"] = (
-                    f"HTTP {response.status_code}"
+                    "urlscan.io returned "
+                    f"HTTP {response.status_code}."
                 )
 
             return result
 
+        result["connected"] = True
+
         data = response.json()
 
-        results = data.get(
+        scans = data.get(
             "results",
             []
         )
 
         result["checked"] = True
-        result["total"] = int(
-            data.get(
-                "total",
-                len(results)
+
+        try:
+            result["total"] = int(
+                data.get(
+                    "total",
+                    len(
+                        scans
+                    )
+                )
+                or 0
             )
-            or 0
-        )
+        except Exception:
+            result["total"] = len(
+                scans
+            )
+
         result["recent_count"] = len(
-            results
+            scans
         )
 
         highest_score = None
+        malicious_count = 0
         categories = set()
         brands = set()
-        malicious_count = 0
 
         for index, scan in enumerate(
-            results
+            scans
         ):
             task = scan.get(
                 "task",
                 {}
-            )
-            page = scan.get(
+            ) or {}
+
+            page_data = scan.get(
                 "page",
                 {}
-            )
+            ) or {}
+
             verdicts = scan.get(
                 "verdicts",
                 {}
-            )
+            ) or {}
 
             if index == 0:
                 result["last_seen"] = (
                     task.get(
                         "time"
                     )
-                    or scan.get(
-                        "_source",
-                        {}
-                    ).get(
-                        "task",
-                        {}
-                    ).get(
-                        "time"
-                    )
+                    or ""
                 )
 
                 result["latest_title"] = (
-                    page.get(
+                    page_data.get(
                         "title"
                     )
                     or ""
                 )
 
                 result["latest_ip"] = (
-                    page.get(
+                    page_data.get(
                         "ip"
                     )
                     or ""
                 )
 
                 result["latest_country"] = (
-                    page.get(
+                    page_data.get(
                         "country"
                     )
                     or ""
@@ -1762,7 +1825,7 @@ def check_urlscan_history(hostname):
             urlscan_verdict = verdicts.get(
                 "urlscan",
                 {}
-            )
+            ) or {}
 
             if isinstance(
                 urlscan_verdict,
@@ -1792,18 +1855,26 @@ def check_urlscan_history(hostname):
                     ):
                         highest_score = score
 
-                for category in urlscan_verdict.get(
-                    "categories",
-                    []
-                ) or []:
+                for category in (
+                    urlscan_verdict.get(
+                        "categories",
+                        []
+                    )
+                    or []
+                ):
                     categories.add(
-                        str(category)
+                        str(
+                            category
+                        )
                     )
 
-                for brand in urlscan_verdict.get(
-                    "brands",
-                    []
-                ) or []:
+                for brand in (
+                    urlscan_verdict.get(
+                        "brands",
+                        []
+                    )
+                    or []
+                ):
                     if isinstance(
                         brand,
                         dict
@@ -1816,27 +1887,29 @@ def check_urlscan_history(hostname):
                                 "key"
                             )
                         )
+                    else:
+                        brand_name = brand
 
-                        if brand_name:
-                            brands.add(
-                                str(
-                                    brand_name
-                                )
+                    if brand_name:
+                        brands.add(
+                            str(
+                                brand_name
                             )
+                        )
 
-            general_score = verdicts.get(
+            top_score = verdicts.get(
                 "score"
             )
 
             if isinstance(
-                general_score,
+                top_score,
                 (int, float)
             ):
                 if (
                     highest_score is None
-                    or general_score > highest_score
+                    or top_score > highest_score
                 ):
-                    highest_score = general_score
+                    highest_score = top_score
 
             if malicious:
                 malicious_count += 1
@@ -1860,6 +1933,14 @@ def check_urlscan_history(hostname):
     except requests.exceptions.Timeout:
         result["error"] = (
             "urlscan.io timed out."
+        )
+
+    except requests.exceptions.RequestException as error:
+        result["error"] = (
+            "Could not connect to urlscan.io: "
+            + str(
+                error
+            )
         )
 
     except Exception as error:
@@ -2634,8 +2715,9 @@ def inspect_page(browser_url):
                 result["preview_status"] = "blocked"
 
                 result["preview_message"] = (
-                    "The website restricted Yeti's automated browser. "
-                    "The screenshot shows what Yeti was able to see. "
+                    "Preview restricted by the website's anti-bot or access-control system. "
+                    "Yeti kept the screenshot of what its browser saw and continued the "
+                    "domain, redirect, certificate and reputation checks. "
                     "This restriction is not counted as evidence of phishing."
                 )
 
@@ -3224,6 +3306,49 @@ def analyse_url(url):
 
 
 
+
+# ------------------------------------------------------------
+# ANALYSIS CONFIDENCE
+# ------------------------------------------------------------
+
+def get_analysis_confidence(result):
+    unavailable = 0
+
+    page = result.get("page", {})
+    preview_status = page.get("preview_status")
+
+    if preview_status in ("blocked", "partial", "failed"):
+        unavailable += 1
+
+    rdap = result.get("rdap", {})
+    if rdap.get("age_days") is None:
+        unavailable += 1
+
+    tls = result.get("tls", {})
+    if not tls.get("valid"):
+        unavailable += 1
+
+    if not result.get("google_webrisk", {}).get("checked"):
+        unavailable += 1
+
+    if unavailable >= 3:
+        return (
+            "Limited",
+            "Several checks could not complete, so treat this result with extra caution."
+        )
+
+    if unavailable >= 1:
+        return (
+            "Moderate",
+            "Most checks completed, but some evidence was unavailable."
+        )
+
+    return (
+        "High",
+        "The main Yeti checks completed successfully."
+    )
+
+
 # ------------------------------------------------------------
 # PDF INVESTIGATION REPORT
 # ------------------------------------------------------------
@@ -3525,6 +3650,10 @@ def make_pdf_report(result):
     verdict = result.get(
         "verdict",
         "Unable to Check"
+    )
+
+    confidence_label, confidence_message = get_analysis_confidence(
+        result
     )
 
     score = result.get(
@@ -3869,6 +3998,10 @@ def make_pdf_report(result):
     detail_rows = [
         ("HTTP status", result.get("status_code", "Unknown")),
         ("Website status", result.get("site_status", "Unknown")),
+        (
+            "Analysis confidence",
+            f"{confidence_label} - {confidence_message}"
+        ),
         ("Content type", result.get("content_type", "Unknown")),
         ("Server", result.get("server", "Unknown")),
         ("Hostname", result.get("hostname", "Unknown")),
@@ -4948,6 +5081,15 @@ if submitted:
         # Only useful supporting facts
         # ----------------------------------------------------
 
+
+        confidence_label, confidence_message = get_analysis_confidence(
+            result
+        )
+
+        st.caption(
+            f"Analysis confidence: {confidence_label} — {confidence_message}"
+        )
+
         c1, c2, c3 = st.columns(
             3
         )
@@ -5161,6 +5303,7 @@ if submitted:
                         "malicious_found"
                     ):
                         urlscan_text = (
+                            "Connected - "
                             f"{urlscan.get('malicious_count', 0)} recent scan(s) "
                             "reported malicious"
                         )
@@ -5169,12 +5312,13 @@ if submitted:
                         0
                     ) > 0:
                         urlscan_text = (
+                            "Connected - "
                             f"{urlscan.get('recent_count', 0)} recent scan(s), "
                             "no malicious verdict found"
                         )
                     else:
                         urlscan_text = (
-                            "No recent scans found"
+                            "Connected - no recent scans found"
                         )
                 else:
                     urlscan_text = (
@@ -5219,6 +5363,35 @@ if submitted:
                     history_text
                 )
             )
+
+            confidence_label, confidence_message = get_analysis_confidence(
+                result
+            )
+
+            detail_rows.append(
+                (
+                    "Analysis confidence",
+                    f"{confidence_label} - {confidence_message}"
+                )
+            )
+
+            preview = result.get(
+                "page",
+                {}
+            )
+
+            if preview.get(
+                "preview_status"
+            ) == "blocked":
+                detail_rows.append(
+                    (
+                        "Browser preview",
+                        (
+                            "Restricted by the website. "
+                            "Yeti used non-browser checks and historical reputation data instead."
+                        )
+                    )
+                )
 
             for label, value in detail_rows:
                 label_col, value_col = st.columns(
