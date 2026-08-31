@@ -1,3 +1,4 @@
+
 import streamlit as st
 import requests
 import socket
@@ -5,6 +6,7 @@ import ssl
 import os
 import re
 import hashlib
+import io
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -12,6 +14,7 @@ from difflib import SequenceMatcher
 
 import tldextract
 from playwright.sync_api import sync_playwright
+from streamlit_paste_button import paste_image_button
 
 # QR support
 try:
@@ -222,6 +225,13 @@ st.markdown(
         color: #ffffff !important;
     }
 
+
+    /* Keep the clipboard component area consistent with the app */
+    iframe[title*="streamlit_paste_button"],
+    iframe[title*="streamlit-paste-button"] {
+        background: transparent !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -416,6 +426,88 @@ def decode_qr_codes(uploaded_file):
 
     except Exception:
         return []
+
+
+
+def decode_qr_from_pasted_image(image):
+    """
+    Read QR codes from a clipboard image.
+    The clipboard component returns a PIL image.
+    """
+
+    if not QR_SUPPORT or image is None:
+        return []
+
+    try:
+        rgb = np.array(image.convert("RGB"))
+        bgr = cv2.cvtColor(
+            rgb,
+            cv2.COLOR_RGB2BGR
+        )
+
+        detector = cv2.QRCodeDetector()
+
+        values = []
+
+        try:
+            ok, decoded, points, _ = (
+                detector.detectAndDecodeMulti(
+                    bgr
+                )
+            )
+
+            if ok:
+                for item in decoded:
+                    if item:
+                        values.append(
+                            item.strip()
+                        )
+        except Exception:
+            pass
+
+        if not values:
+            try:
+                value, points, _ = (
+                    detector.detectAndDecode(
+                        bgr
+                    )
+                )
+
+                if value:
+                    values.append(
+                        value.strip()
+                    )
+            except Exception:
+                pass
+
+        return values
+
+    except Exception:
+        return []
+
+
+def reset_yeti():
+    """
+    Clear all user input and start a fresh check.
+    This runs before Streamlit redraws the widgets.
+    """
+
+    if "yeti_text" in st.session_state:
+        st.session_state["yeti_text"] = ""
+
+    if "qr_upload" in st.session_state:
+        del st.session_state["qr_upload"]
+
+    st.session_state["qr_reset_counter"] = (
+        st.session_state.get(
+            "qr_reset_counter",
+            0
+        )
+        + 1
+    )
+
+    if "last_results" in st.session_state:
+        del st.session_state["last_results"]
 
 
 # ------------------------------------------------------------
@@ -2137,24 +2229,55 @@ def create_text_report(results):
 
 
 # ------------------------------------------------------------
+# INPUT STATE
+# ------------------------------------------------------------
+
+if "qr_reset_counter" not in st.session_state:
+    st.session_state["qr_reset_counter"] = 0
+
+
+# ------------------------------------------------------------
 # INPUT
 # ------------------------------------------------------------
 
-with st.form(
-    "yeti_check_form",
-    clear_on_submit=False
-):
+pasted_text = st.text_area(
+    "Link or message",
+    placeholder=(
+        "Paste a website, several websites, "
+        "or a suspicious email or message here"
+    ),
+    height=140,
+    key="yeti_text"
+)
 
-    pasted_text = st.text_area(
-        "Link or message",
-        placeholder=(
-            "Paste a website, several websites, "
-            "or a suspicious email or message here"
-        ),
-        height=140,
-        key="yeti_text"
+st.write("QR code")
+
+paste_result = paste_image_button(
+    label="Paste QR code",
+    text_color="#ffffff",
+    background_color="#1f2933",
+    hover_background_color="#344150",
+    key=f"paste_qr_{st.session_state['qr_reset_counter']}",
+    errors="ignore"
+)
+
+pasted_qr_image = None
+
+if paste_result is not None:
+    pasted_qr_image = getattr(
+        paste_result,
+        "image_data",
+        None
     )
 
+if pasted_qr_image is not None:
+    st.image(
+        pasted_qr_image,
+        caption="Pasted QR image",
+        width=260
+    )
+
+with st.expander("Upload QR image instead"):
     qr_file = st.file_uploader(
         "QR code image",
         type=[
@@ -2163,18 +2286,14 @@ with st.form(
             "jpeg",
             "webp"
         ],
-        help=(
-            "Optional. Upload a QR code image and "
-            "Yeti will check the hidden link."
-        )
+        key="qr_upload",
+        label_visibility="collapsed"
     )
 
-    submitted = (
-        st.form_submit_button(
-            "Check"
-        )
-    )
-
+submitted = st.button(
+    "Check",
+    key="check_button"
+)
 
 # ------------------------------------------------------------
 # RUN
@@ -2185,6 +2304,34 @@ if submitted:
     urls = extract_urls_from_text(
         pasted_text
     )
+
+    pasted_qr_values = decode_qr_from_pasted_image(
+        pasted_qr_image
+    )
+
+    for value in pasted_qr_values:
+
+        qr_urls = extract_urls_from_text(
+            value
+        )
+
+        if (
+            not qr_urls
+            and "." in value
+        ):
+            qr_urls = [
+                clean_url(
+                    value
+                )
+            ]
+
+        for item in qr_urls:
+
+            if item not in urls:
+                urls.append(
+                    item
+                )
+
 
     for value in decode_qr_codes(
         qr_file
@@ -2215,7 +2362,7 @@ if submitted:
     if not urls:
 
         if (
-            qr_file is not None
+            (qr_file is not None or pasted_qr_image is not None)
             and not QR_SUPPORT
         ):
 
@@ -2224,7 +2371,10 @@ if submitted:
                 "Check the requirements.txt file."
             )
 
-        elif qr_file is not None:
+        elif (
+            qr_file is not None
+            or pasted_qr_image is not None
+        ):
 
             st.warning(
                 "No website link could be read from the QR code."
@@ -2310,6 +2460,8 @@ if submitted:
 
     progress.empty()
     status.empty()
+
+    st.session_state["last_results"] = results
 
 
     # --------------------------------------------------------
@@ -2655,13 +2807,8 @@ if submitted:
         mime="text/plain"
     )
 
-    if st.button(
+    st.button(
         "Reset",
-        key="reset_button"
-    ):
-
-        st.session_state[
-            "yeti_text"
-        ] = ""
-
-        st.rerun()
+        key="reset_button",
+        on_click=reset_yeti
+    )
