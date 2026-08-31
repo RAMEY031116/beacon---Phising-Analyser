@@ -1,0 +1,25 @@
+[client]
+toolbarMode = "viewer"
+
+[theme]
+base = "light"
+primaryColor = "#2C6E91"
+baseRadius = "medium"
+buttonRadius = "medium"
+showWidgetBorder = true
+
+[theme.light]
+primaryColor = "#2C6E91"
+backgroundColor = "#F7F9FC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#17212B"
+borderColor = "#D8E0E8"
+linkColor = "#245F80"
+
+[theme.dark]
+primaryColor = "#6EB6D8"
+backgroundColor = "#0F1720"
+secondaryBackgroundColor = "#18222D"
+textColor = "#F2F6FA"
+borderColor = "#394957"
+linkColor = "#8CC9E5"
