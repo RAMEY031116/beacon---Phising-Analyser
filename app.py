@@ -131,9 +131,9 @@ st.markdown(
         background: var(--yeti-card) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 10px;
-        padding: 0.9rem 1rem;
-        margin-top: 0.7rem;
-        margin-bottom: 0.7rem;
+        padding: 0.7rem 0.85rem;
+        margin-top: 0.45rem;
+        margin-bottom: 0.45rem;
         color: var(--yeti-text) !important;
     }
 
@@ -151,7 +151,8 @@ st.markdown(
     }
 
     .preview-wrap {
-        margin: 0.45rem 0 0.7rem 0;
+        margin: 0.35rem auto 0.6rem auto;
+        max-width: 235px;
     }
 
     .preview-wrap a {
@@ -160,25 +161,29 @@ st.markdown(
     }
 
     .preview-wrap img {
-        width: 100%;
-        height: 210px;
+        width: 225px;
+        max-width: 100%;
+        aspect-ratio: 1 / 1;
         object-fit: cover;
         object-position: top;
         border: 1px solid var(--yeti-border);
-        border-radius: 9px;
+        border-radius: 12px;
         display: block;
+        margin: 0 auto;
         background: #ffffff;
+        cursor: zoom-in;
         transition: transform 0.12s ease, box-shadow 0.12s ease;
     }
 
     .preview-wrap img:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 16px rgba(0,0,0,0.14);
     }
 
     .preview-note {
+        text-align: center;
         color: var(--yeti-muted) !important;
-        font-size: 0.8rem;
+        font-size: 0.76rem;
         margin-top: 0.3rem;
     }
 
@@ -246,12 +251,36 @@ st.markdown(
 
     div[data-testid="stExpander"] {
         background: #ffffff !important;
-        border: 1px solid var(--yeti-border) !important;
+        border: 1px solid #d7dee7 !important;
         border-radius: 9px !important;
+        overflow: hidden !important;
     }
 
-    div[data-testid="stExpander"] * {
-        color: var(--yeti-text) !important;
+    div[data-testid="stExpander"] details,
+    div[data-testid="stExpander"] summary {
+        background: #ffffff !important;
+        color: #17212b !important;
+    }
+
+    div[data-testid="stExpander"] summary {
+        min-height: 2.6rem !important;
+        padding: 0.15rem 0.35rem !important;
+    }
+
+    div[data-testid="stExpander"] summary:hover {
+        background: #eef4f8 !important;
+    }
+
+    div[data-testid="stExpander"] *,
+    div[data-testid="stExpander"] svg {
+        color: #17212b !important;
+        fill: currentColor !important;
+    }
+
+    div[data-testid="stExpander"] p,
+    div[data-testid="stExpander"] span,
+    div[data-testid="stExpander"] label {
+        color: #17212b !important;
     }
 
     div[data-testid="stAlert"] *,
@@ -1815,7 +1844,7 @@ def render_clickable_preview(
                     <img src="{data_url}" alt="{caption}">
                 </a>
                 <div class="preview-note">
-                    Click the preview to open it larger.
+                    Click image to view the full-page screenshot.
                 </div>
             </div>
             """,
@@ -2666,7 +2695,7 @@ if submitted:
                         "Preview unavailable."
                     )
 
-                # Keep tile facts compact.
+                # Keep the visible tile very compact.
                 metric_col1, metric_col2 = st.columns(
                     2
                 )
@@ -2687,34 +2716,12 @@ if submitted:
                         )
                     )
 
-                metric_col3, metric_col4 = st.columns(
-                    2
-                )
-
-                with metric_col3:
-                    st.metric(
-                        "HTTPS",
-                        (
-                            "Valid"
-                            if tls.get(
-                                "valid"
-                            )
-                            else "Not validated"
-                        )
-                    )
-
-                with metric_col4:
-                    if days_left is None:
-                        cert_text = "Unknown"
-                    elif days_left < 0:
-                        cert_text = "Expired"
-                    else:
-                        cert_text = f"{days_left} days"
-
-                    st.metric(
-                        "Certificate",
-                        cert_text
-                    )
+                if days_left is None:
+                    cert_text = "Unknown"
+                elif days_left < 0:
+                    cert_text = "Expired"
+                else:
+                    cert_text = f"{days_left} days"
 
                 if result.get(
                     "reasons"
@@ -2738,11 +2745,27 @@ if submitted:
                     )
 
                 with st.expander(
-                    "More details"
+                    "Website details"
                 ):
                     st.write(
                         "Risk score:",
                         f"{result.get('score', 0)}/100"
+                    )
+
+                    st.write(
+                        "HTTPS:",
+                        (
+                            "Valid"
+                            if tls.get(
+                                "valid"
+                            )
+                            else "Not validated"
+                        )
+                    )
+
+                    st.write(
+                        "Certificate expiry:",
+                        cert_text
                     )
 
                     st.write(
