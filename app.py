@@ -88,15 +88,17 @@ PHISHTANK_APP_KEY = get_secret(
 st.markdown(
     """
     <style>
+    /*
+    Yeti follows the active Streamlit Light/Dark theme.
+    These variables are provided by Streamlit itself.
+    */
     :root {
-        --yeti-bg: #f4f7fb;
-        --yeti-card: #ffffff;
-        --yeti-text: #17212b;
-        --yeti-muted: #667085;
-        --yeti-border: #d7dee7;
-        --yeti-blue: #2e5f8a;
-        --yeti-blue-dark: #224867;
-        --yeti-soft: #eaf1f7;
+        --yeti-bg: var(--background-color);
+        --yeti-surface: var(--secondary-background-color);
+        --yeti-text: var(--text-color);
+        --yeti-accent: var(--primary-color);
+        --yeti-border: color-mix(in srgb, var(--text-color) 18%, transparent);
+        --yeti-muted: color-mix(in srgb, var(--text-color) 66%, transparent);
     }
 
     html, body, .stApp {
@@ -105,15 +107,36 @@ st.markdown(
     }
 
     .block-container {
-        max-width: 1120px;
-        padding-top: 1.5rem;
+        max-width: 1080px;
+        padding-top: 1.2rem;
         padding-bottom: 3rem;
     }
 
+    /*
+    Remove Streamlit's dark top strip / decoration.
+    The app still works normally without it.
+    */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: 0 !important;
+        min-height: 0 !important;
+    }
+
+    div[data-testid="stToolbar"],
+    div[data-testid="stDecoration"] {
+        display: none !important;
+    }
+
+    #MainMenu,
+    footer {
+        visibility: hidden !important;
+    }
+
+    /* Header / Yeti logo */
     .yeti-header {
         display: flex;
         justify-content: center;
-        margin-bottom: 0.25rem;
+        margin: 0.15rem 0 0.2rem 0;
     }
 
     .yeti-home {
@@ -123,10 +146,11 @@ st.markdown(
         text-decoration: none !important;
         padding: 0.35rem 0.55rem;
         border-radius: 12px;
+        color: var(--yeti-text) !important;
     }
 
     .yeti-home:hover {
-        background: var(--yeti-soft);
+        background: var(--yeti-surface) !important;
     }
 
     .yeti-logo {
@@ -136,7 +160,7 @@ st.markdown(
     }
 
     .yeti-wordmark {
-        font-size: 2.2rem;
+        font-size: 2.15rem;
         font-weight: 750;
         letter-spacing: -0.035em;
         color: var(--yeti-text) !important;
@@ -145,25 +169,17 @@ st.markdown(
     .yeti-subtitle {
         text-align: center;
         color: var(--yeti-muted) !important;
-        margin-bottom: 1.5rem;
+        margin-bottom: 1.15rem;
+        font-size: 0.95rem;
     }
 
-    .help-box {
-        background: var(--yeti-card) !important;
-        border: 1px solid var(--yeti-border) !important;
-        border-radius: 10px;
-        padding: 0.9rem 1rem;
-        margin-bottom: 1rem;
-        color: var(--yeti-text) !important;
-    }
-
+    /* Cards */
     .result-card {
-        background: var(--yeti-card) !important;
+        background: var(--yeti-surface) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 10px;
-        padding: 0.9rem 1rem;
-        margin-top: 0.7rem;
-        margin-bottom: 0.7rem;
+        padding: 0.8rem 0.95rem;
+        margin: 0.65rem 0;
         color: var(--yeti-text) !important;
     }
 
@@ -174,34 +190,14 @@ st.markdown(
     .result-title {
         font-size: 1.08rem;
         font-weight: 700;
+        color: var(--yeti-text) !important;
     }
 
     .muted {
         color: var(--yeti-muted) !important;
     }
 
-    .preview-wrap {
-        margin: 0.5rem 0 1rem 0;
-    }
-
-    .preview-wrap img {
-        width: 100%;
-        max-width: 620px;
-        height: 330px;
-        object-fit: cover;
-        object-position: top;
-        border: 1px solid var(--yeti-border);
-        border-radius: 9px;
-        display: block;
-        background: #ffffff;
-    }
-
-    .preview-note {
-        color: var(--yeti-muted) !important;
-        font-size: 0.88rem;
-        margin-top: 0.35rem;
-    }
-
+    /* General text */
     .stApp p,
     .stApp span,
     .stApp label,
@@ -214,44 +210,72 @@ st.markdown(
         color: var(--yeti-text) !important;
     }
 
+    /* Inputs */
     .stTextArea textarea,
     .stTextInput input {
-        background: #ffffff !important;
+        background: var(--yeti-surface) !important;
         color: var(--yeti-text) !important;
         caret-color: var(--yeti-text) !important;
-        border: 1px solid #c7d0da !important;
+        border: 1px solid var(--yeti-border) !important;
         border-radius: 8px !important;
     }
 
     .stTextArea textarea::placeholder,
     .stTextInput input::placeholder {
-        color: #8894a2 !important;
-        opacity: 1 !important;
+        color: var(--yeti-muted) !important;
+        opacity: 0.9 !important;
     }
 
+    /* Metrics */
     div[data-testid="stMetric"] {
-        background: #ffffff !important;
+        background: var(--yeti-surface) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
-        padding: 0.7rem !important;
+        padding: 0.65rem !important;
     }
 
-    div[data-testid="stMetric"] * {
+    div[data-testid="stMetric"] *,
+    div[data-testid="stMetricValue"],
+    div[data-testid="stMetricValue"] * {
         color: var(--yeti-text) !important;
     }
 
-    div[data-testid="stMetricLabel"] *,
-    div[data-testid="stMetricLabel"] {
+    div[data-testid="stMetricLabel"],
+    div[data-testid="stMetricLabel"] * {
         color: var(--yeti-muted) !important;
     }
 
+    /* Expanders */
     div[data-testid="stExpander"] {
-        background: #ffffff !important;
+        background: var(--yeti-surface) !important;
         border: 1px solid var(--yeti-border) !important;
         border-radius: 9px !important;
+        overflow: hidden !important;
     }
 
-    div[data-testid="stExpander"] * {
+    div[data-testid="stExpander"] details,
+    div[data-testid="stExpander"] summary {
+        background: var(--yeti-surface) !important;
+        color: var(--yeti-text) !important;
+    }
+
+    div[data-testid="stExpander"] summary:hover {
+        background: color-mix(
+            in srgb,
+            var(--yeti-surface) 88%,
+            var(--yeti-text) 12%
+        ) !important;
+    }
+
+    div[data-testid="stExpander"] *,
+    div[data-testid="stExpander"] svg {
+        color: var(--yeti-text) !important;
+        fill: currentColor !important;
+    }
+
+    /* Alerts */
+    div[data-testid="stAlert"],
+    div[data-testid="stNotification"] {
         color: var(--yeti-text) !important;
     }
 
@@ -260,14 +284,16 @@ st.markdown(
         color: var(--yeti-text) !important;
     }
 
+    /* Buttons - theme aware, always readable */
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button,
     div[data-testid="stDownloadButton"] button {
-        background: var(--yeti-blue-dark) !important;
+        background: var(--yeti-accent) !important;
         color: #ffffff !important;
-        border: 1px solid var(--yeti-blue-dark) !important;
+        border: 1px solid var(--yeti-accent) !important;
         border-radius: 8px !important;
         font-weight: 650 !important;
+        min-height: 2.55rem;
     }
 
     .stButton > button *,
@@ -279,15 +305,15 @@ st.markdown(
     .stButton > button:hover,
     div[data-testid="stFormSubmitButton"] > button:hover,
     div[data-testid="stDownloadButton"] button:hover {
-        background: var(--yeti-blue) !important;
+        filter: brightness(1.08);
         color: #ffffff !important;
-        border-color: var(--yeti-blue) !important;
     }
 
+    /* Uploaders */
     section[data-testid="stFileUploaderDropzone"] {
-        background: #ffffff !important;
+        background: var(--yeti-surface) !important;
         color: var(--yeti-text) !important;
-        border-color: #c7d0da !important;
+        border-color: var(--yeti-border) !important;
     }
 
     section[data-testid="stFileUploaderDropzone"] * {
@@ -295,13 +321,30 @@ st.markdown(
     }
 
     section[data-testid="stFileUploaderDropzone"] button {
-        background: var(--yeti-blue-dark) !important;
+        background: var(--yeti-accent) !important;
         color: #ffffff !important;
-        border: 1px solid var(--yeti-blue-dark) !important;
+        border: 1px solid var(--yeti-accent) !important;
     }
 
     section[data-testid="stFileUploaderDropzone"] button * {
         color: #ffffff !important;
+    }
+
+    /* Screenshot */
+    div[data-testid="stImage"] {
+        max-width: 820px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    div[data-testid="stImage"] img {
+        border: 1px solid var(--yeti-border);
+        border-radius: 10px;
+        background: var(--yeti-surface);
+    }
+
+    hr {
+        border-color: var(--yeti-border) !important;
     }
     </style>
     """,
@@ -408,10 +451,10 @@ def clean_url(value):
 def extract_urls_from_text(text):
     """
     Supports:
-    - full URLs
-    - www URLs
-    - several bare domains on separate lines
-    - URLs pasted inside a full email/message
+    - one full URL
+    - several URLs, one per line
+    - bare domains such as tesco.com
+    - URLs mixed into a full email or message
     """
 
     if not text:
@@ -419,36 +462,49 @@ def extract_urls_from_text(text):
 
     urls = []
 
-    # Full URLs and www links anywhere in the text
+    # Full http/https/www links anywhere in the pasted text.
     pattern = re.compile(
         r'(?:(?:https?://)|(?:www\.))[^\s<>"\']+',
         re.IGNORECASE
     )
 
-    for item in pattern.findall(text):
-        item = clean_url(item)
-        if item not in urls:
-            urls.append(item)
+    for item in pattern.findall(
+        text
+    ):
+        item = clean_url(
+            item
+        )
 
-    # Also support bare domains line-by-line, e.g.
-    # tesco.com
-    # microsoft.com
-    # example.co.uk/path
+        if item not in urls:
+            urls.append(
+                item
+            )
+
+    # Bare domains on separate lines.
     bare_pattern = re.compile(
-        r'^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^\s]*)?$'
+        r'^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}'
+        r'(?::\d+)?(?:/[^\s]*)?$'
     )
 
     for line in text.splitlines():
-        candidate = line.strip().strip(".,);]>}\"'")
+        candidate = line.strip().strip(
+            ".,);]>}\"'"
+        )
 
         if not candidate:
             continue
 
-        if bare_pattern.match(candidate):
-            item = clean_url(candidate)
+        if bare_pattern.match(
+            candidate
+        ):
+            candidate = clean_url(
+                candidate
+            )
 
-            if item not in urls:
-                urls.append(item)
+            if candidate not in urls:
+                urls.append(
+                    candidate
+                )
 
     return urls
 
@@ -2353,20 +2409,6 @@ if "qr_reset_counter" not in st.session_state:
 # INPUT
 # ------------------------------------------------------------
 
-st.markdown(
-    """
-    <div class="help-box">
-        <strong>How to check several links:</strong><br>
-        Paste one link per line, or paste the whole email/message and Yeti will find the links automatically.<br><br>
-        Example:<br>
-        tesco.com<br>
-        https://microsoft.com<br>
-        https://example.co.uk/login
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
 current_text = st.session_state.get(
     "yeti_text",
     ""
@@ -2388,11 +2430,12 @@ text_height = min(
 pasted_text = st.text_area(
     "Links or message",
     placeholder=(
-        "Paste one link, several links (one per line), "
-        "or paste the whole suspicious message here"
+        "Paste one link, several links one per line, "
+        "or paste a whole suspicious email/message and Yeti will find the links"
     ),
     height=text_height,
-    key="yeti_text"
+    key="yeti_text",
+    help="For several links, put one link on each line."
 )
 
 col_qr, col_email = st.columns(2)
@@ -2802,7 +2845,7 @@ if submitted:
             st.image(
                 screenshot,
                 caption="Website preview",
-                width=760
+                use_container_width=True
             )
 
         elif preview.get(
