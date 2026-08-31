@@ -4,5 +4,4 @@ playwright
 tldextract
 opencv-python-headless
 numpy
-streamlit-paste-button
-pillow
+reportlab
