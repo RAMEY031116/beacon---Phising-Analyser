@@ -2582,6 +2582,75 @@ def get_browser_path():
     return None
 
 
+def prepare_full_page_for_screenshot(page):
+    """
+    Scroll through the document before taking a full-page screenshot.
+
+    This helps trigger lazy-loaded images/sections before Playwright
+    captures the complete document height.
+    """
+    try:
+        page.evaluate(
+            """
+            async () => {
+                const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+                const getHeight = () => Math.max(
+                    document.body ? document.body.scrollHeight : 0,
+                    document.documentElement ? document.documentElement.scrollHeight : 0
+                );
+
+                let previousHeight = 0;
+
+                for (let round = 0; round < 3; round++) {
+                    const height = getHeight();
+
+                    const step = Math.max(
+                        500,
+                        Math.floor(window.innerHeight * 0.75)
+                    );
+
+                    for (let y = 0; y < height; y += step) {
+                        window.scrollTo(0, y);
+                        await delay(180);
+                    }
+
+                    window.scrollTo(0, getHeight());
+                    await delay(500);
+
+                    const newHeight = getHeight();
+
+                    if (newHeight === previousHeight) {
+                        break;
+                    }
+
+                    previousHeight = newHeight;
+                }
+
+                window.scrollTo(0, 0);
+                await delay(350);
+            }
+            """
+        )
+    except Exception:
+        pass
+
+    try:
+        page.wait_for_load_state(
+            "networkidle",
+            timeout=5000
+        )
+    except Exception:
+        pass
+
+    try:
+        page.wait_for_timeout(
+            700
+        )
+    except Exception:
+        pass
+
+
 def inspect_page(browser_url):
     result = {
         "title": "Unknown",
@@ -2721,12 +2790,17 @@ def inspect_page(browser_url):
                     "This restriction is not counted as evidence of phishing."
                 )
 
-                # Capture the block/challenge page instead of returning
-                # without a screenshot.
+                # Capture the complete block/challenge page instead of
+                # returning without a screenshot.
+                prepare_full_page_for_screenshot(
+                    page
+                )
+
                 try:
                     page.screenshot(
                         path=screenshot_path,
-                        full_page=True
+                        full_page=True,
+                        animations="disabled"
                     )
 
                     if os.path.exists(
@@ -2832,15 +2906,24 @@ def inspect_page(browser_url):
             except Exception:
                 pass
 
-            # Viewport-only screenshot.
-            # This avoids very tall images shrinking down and becoming unreadable.
+            # True full-page screenshot.
+            # Scroll first so lazy-loaded content is present, then capture
+            # the entire document height.
+            prepare_full_page_for_screenshot(
+                page
+            )
+
             try:
                 page.screenshot(
                     path=screenshot_path,
-                    full_page=False
+                    full_page=True,
+                    animations="disabled"
                 )
 
-                result["screenshot"] = screenshot_path
+                if os.path.exists(
+                    screenshot_path
+                ):
+                    result["screenshot"] = screenshot_path
             except Exception:
                 pass
 
@@ -3909,7 +3992,7 @@ def make_pdf_report(result):
     ):
         story.append(
             Paragraph(
-                "Website preview",
+                "Full website screenshot",
                 section_style
             )
         )
@@ -3923,7 +4006,7 @@ def make_pdf_report(result):
             )
 
             max_width = 160 * mm
-            max_height = 95 * mm
+            max_height = 220 * mm
 
             scale = min(
                 max_width / width_px,
@@ -5014,7 +5097,7 @@ if submitted:
         ):
             st.image(
                 screenshot,
-                caption="Website preview",
+                caption="Full website screenshot",
                 use_container_width=True
             )
 
