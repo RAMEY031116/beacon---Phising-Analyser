@@ -239,6 +239,42 @@ st.markdown(
         background: transparent !important;
     }
 
+
+    .yeti-logo-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.65rem;
+        text-decoration: none !important;
+        padding: 0.25rem 0.45rem;
+        border-radius: 10px;
+    }
+
+    .yeti-logo-link:hover {
+        background-color: #e9edf2;
+        text-decoration: none !important;
+    }
+
+    .yeti-logo-mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 9px;
+        background-color: #1f2933;
+        color: #ffffff !important;
+        font-size: 1.35rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .yeti-logo-name {
+        color: #1f2933 !important;
+        font-size: 2.15rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -251,7 +287,12 @@ st.markdown(
 
 st.markdown(
     """
-    <div class="main-title">Yeti Check</div>
+    <div style="text-align:center; margin-bottom:0.2rem;">
+        <a href="./" target="_self" class="yeti-logo-link">
+            <span class="yeti-logo-mark">Y</span>
+            <span class="yeti-logo-name">Yeti Check</span>
+        </a>
+    </div>
     <div class="sub-title">
         Check websites, messages and QR codes before you use them
     </div>
@@ -2277,13 +2318,32 @@ if "qr_reset_counter" not in st.session_state:
 # INPUT
 # ------------------------------------------------------------
 
+current_text = st.session_state.get(
+    "yeti_text",
+    ""
+)
+
+line_count = max(
+    1,
+    current_text.count("\n") + 1
+)
+
+# Compact for one link, taller when several links/messages are pasted.
+text_box_height = min(
+    260,
+    max(
+        80,
+        62 + (line_count * 22)
+    )
+)
+
 pasted_text = st.text_area(
     "Link or message",
     placeholder=(
         "Paste a website, several websites, "
         "or a suspicious email or message here"
     ),
-    height=140,
+    height=text_box_height,
     key="yeti_text"
 )
 
@@ -2674,15 +2734,12 @@ if submitted:
             "preview_status"
         )
 
-        # Main result card
+        # Website name first
         st.markdown(
             f"""
             <div class="result-box">
                 <div class="result-title">{domain}</div>
                 <div class="muted">
-                    {result["verdict"]} &nbsp; | &nbsp;
-                    Risk score: {result.get("score", 0)}/100
-                    &nbsp; | &nbsp;
                     {result.get("site_status", "Unknown")}
                 </div>
             </div>
@@ -2690,7 +2747,32 @@ if submitted:
             unsafe_allow_html=True
         )
 
-        # Important information always visible
+        # Preview comes before the risk score so the page can be
+        # visually checked immediately.
+        if (
+            screenshot
+            and os.path.exists(
+                screenshot
+            )
+        ):
+            st.image(
+                screenshot,
+                caption="Website preview",
+                use_container_width=True
+            )
+
+        elif preview_status == "blocked":
+            st.info(
+                "The website blocked the automated preview. "
+                "This does not mean the site is phishing."
+            )
+
+        elif preview_status == "failed":
+            st.info(
+                "The website preview could not be loaded."
+            )
+
+        # Important information only
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
@@ -2738,41 +2820,22 @@ if submitted:
                 certificate_text
             )
 
-        # Main reason
+        # One-line conclusion
         st.write(
             main_reason(
                 result
             )
         )
 
-        # Screenshot shown immediately, not in dropdown
-        if (
-            screenshot
-            and os.path.exists(
-                screenshot
-            )
-        ):
-            st.image(
-                screenshot,
-                caption="Website preview",
-                use_container_width=True
-            )
-
-        elif preview_status == "blocked":
-            st.info(
-                "The website blocked the automated preview. "
-                "This does not mean the site is phishing."
-            )
-
-        elif preview_status == "failed":
-            st.info(
-                "The website preview could not be loaded."
-            )
-
-        # Only less important information goes in one dropdown
+        # Everything else stays hidden.
         with st.expander(
             "More details"
         ):
+
+            st.write(
+                "Risk score:",
+                f"{result.get('score', 0)}/100"
+            )
 
             st.write(
                 "Original address:",
@@ -2876,6 +2939,8 @@ if submitted:
                     st.write(
                         reason
                     )
+
+        st.divider()
 
 
     # --------------------------------------------------------
