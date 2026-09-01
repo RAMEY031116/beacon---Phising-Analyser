@@ -35,6 +35,7 @@ try:
         Image as RLImage,
         PageBreak,
         KeepTogether,
+        HRFlowable,
     )
     from reportlab.lib.utils import ImageReader
     PDF_REPORT_SUPPORT = True
@@ -3711,7 +3712,14 @@ def clean_report_findings(result):
 
 def make_pdf_report(result):
     """
-    Build a self-contained PDF investigation report in memory.
+    Build a detailed, professional website investigation PDF.
+
+    Design goals:
+    - compact layout with minimal wasted space
+    - clear threat/behaviour assessment
+    - detailed technical evidence
+    - full-page screenshot split into readable chunks
+    - page numbers and consistent header/footer
     """
     if not PDF_REPORT_SUPPORT:
         return None
@@ -3721,15 +3729,16 @@ def make_pdf_report(result):
     document = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=16 * mm,
-        leftMargin=16 * mm,
-        topMargin=17 * mm,
-        bottomMargin=17 * mm,
+        rightMargin=14 * mm,
+        leftMargin=14 * mm,
+        topMargin=18 * mm,
+        bottomMargin=16 * mm,
         title=(
             f"Yeti Check Report - "
             f"{result.get('registered_domain') or result.get('hostname') or 'Website'}"
         ),
         author="Yeti Check by bipzilla",
+        subject="Website phishing and threat investigation report",
     )
 
     styles = getSampleStyleSheet()
@@ -3738,41 +3747,42 @@ def make_pdf_report(result):
         "YetiTitle",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=20,
-        leading=24,
+        fontSize=19,
+        leading=22,
         alignment=TA_CENTER,
         textColor=colors.HexColor("#17212B"),
-        spaceAfter=4 * mm,
+        spaceAfter=2 * mm,
     )
 
-    byline_style = ParagraphStyle(
-        "YetiByline",
+    subtitle_style = ParagraphStyle(
+        "YetiSubtitle",
         parent=styles["Normal"],
         fontName="Helvetica",
         fontSize=8,
         leading=10,
         alignment=TA_CENTER,
         textColor=colors.HexColor("#667085"),
-        spaceAfter=6 * mm,
+        spaceAfter=4 * mm,
     )
 
     section_style = ParagraphStyle(
         "YetiSection",
         parent=styles["Heading2"],
         fontName="Helvetica-Bold",
-        fontSize=11,
-        leading=14,
+        fontSize=10.5,
+        leading=13,
         textColor=colors.HexColor("#17212B"),
-        spaceBefore=4 * mm,
-        spaceAfter=2 * mm,
+        spaceBefore=3.5 * mm,
+        spaceAfter=1.5 * mm,
+        keepWithNext=True,
     )
 
     body_style = ParagraphStyle(
         "YetiBody",
         parent=styles["BodyText"],
         fontName="Helvetica",
-        fontSize=8.5,
-        leading=11,
+        fontSize=8.3,
+        leading=10.5,
         textColor=colors.HexColor("#17212B"),
         wordWrap="CJK",
     )
@@ -3780,12 +3790,340 @@ def make_pdf_report(result):
     small_style = ParagraphStyle(
         "YetiSmall",
         parent=body_style,
-        fontSize=7.5,
-        leading=9.5,
+        fontSize=7.4,
+        leading=9.1,
         textColor=colors.HexColor("#475467"),
     )
 
+    tiny_style = ParagraphStyle(
+        "YetiTiny",
+        parent=body_style,
+        fontSize=6.7,
+        leading=8.2,
+        textColor=colors.HexColor("#667085"),
+    )
+
+    generated = datetime.now(
+        timezone.utc
+    ).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    verdict = result.get("verdict", "Unable to Check")
+    score = result.get("score", 0)
+
+    domain = (
+        result.get("registered_domain")
+        or result.get("hostname")
+        or result.get("url", "Unknown")
+    )
+
+    page_data = result.get("page", {}) or {}
+    rdap = result.get("rdap", {}) or {}
+    tls = result.get("tls", {}) or {}
+    urlscan = result.get("urlscan", {}) or {}
+    history = result.get("local_history", {}) or {}
+    google = result.get("google_webrisk", {}) or {}
+    phishtank = result.get("phish_tank", {}) or {}
+    openphish = result.get("openphish", {}) or {}
+
     story = []
+
+    def draw_frame(canvas, doc):
+        canvas.saveState()
+        width, height = A4
+
+        canvas.setStrokeColor(colors.HexColor("#D9E2EA"))
+        canvas.setLineWidth(0.5)
+        canvas.line(
+            14 * mm,
+            height - 11 * mm,
+            width - 14 * mm,
+            height - 11 * mm
+        )
+        canvas.line(
+            14 * mm,
+            10 * mm,
+            width - 14 * mm,
+            10 * mm
+        )
+
+        canvas.setFont("Helvetica-Bold", 7.2)
+        canvas.setFillColor(colors.HexColor("#2C6E91"))
+        canvas.drawString(
+            14 * mm,
+            height - 8.3 * mm,
+            "Yeti Check"
+        )
+
+        canvas.setFont("Helvetica", 6.6)
+        canvas.setFillColor(colors.HexColor("#667085"))
+        canvas.drawRightString(
+            width - 14 * mm,
+            height - 8.3 * mm,
+            str(domain)[:80]
+        )
+
+        canvas.drawString(
+            14 * mm,
+            6.7 * mm,
+            "Yeti Check by bipzilla"
+        )
+        canvas.drawRightString(
+            width - 14 * mm,
+            6.7 * mm,
+            f"Page {doc.page}"
+        )
+
+        canvas.restoreState()
+
+    def section(title):
+        story.append(
+            Paragraph(
+                report_safe_text(title),
+                section_style
+            )
+        )
+        story.append(
+            HRFlowable(
+                width="100%",
+                thickness=0.45,
+                color=colors.HexColor("#D9E2EA"),
+                spaceBefore=0,
+                spaceAfter=1.6 * mm,
+            )
+        )
+
+    def kv_table(rows, label_width=44 * mm):
+        data = []
+
+        for label, value in rows:
+            data.append(
+                [
+                    Paragraph(
+                        f"<b>{report_safe_text(label)}</b>",
+                        small_style
+                    ),
+                    Paragraph(
+                        report_safe_text(value),
+                        small_style
+                    ),
+                ]
+            )
+
+        table = Table(
+            data,
+            colWidths=[
+                label_width,
+                document.width - label_width
+            ],
+            hAlign="LEFT"
+        )
+
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D7DEE7")),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F4F7F9")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4.5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4.5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3.3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3.3),
+                ]
+            )
+        )
+
+        return table
+
+    def add_bullets(items):
+        if not items:
+            story.append(
+                Paragraph(
+                    "No information recorded.",
+                    small_style
+                )
+            )
+            return
+
+        for item in items:
+            story.append(
+                Paragraph(
+                    f"&#8226; {report_safe_text(item)}",
+                    small_style
+                )
+            )
+
+    def threat_assessment():
+        """
+        Produce a concise classification of what Yeti observed.
+        """
+        findings = {
+            "Phishing / social engineering": "Not detected",
+            "Malware reputation": "Not detected",
+            "Credential harvesting": "Not detected",
+            "Brand impersonation": "Not detected",
+            "Suspicious redirects": "Not detected",
+            "Unsafe form destination": "Not detected",
+        }
+
+        threat_types = google.get("threat_types", []) or []
+
+        if (
+            google.get("confirmed")
+            and "SOCIAL_ENGINEERING" in threat_types
+        ):
+            findings["Phishing / social engineering"] = (
+                "Confirmed by live reputation source"
+            )
+
+        if (
+            google.get("confirmed")
+            and "MALWARE" in threat_types
+        ):
+            findings["Malware reputation"] = (
+                "Confirmed by live reputation source"
+            )
+
+        if phishtank.get("confirmed") or openphish.get("confirmed"):
+            findings["Phishing / social engineering"] = (
+                "Confirmed by phishing reputation source"
+            )
+
+        if page_data.get("password_field"):
+            findings["Credential harvesting"] = (
+                "Password field detected"
+            )
+
+        for reason in result.get("reasons", []):
+            lower = str(reason).lower()
+
+            if (
+                "appears to identify as" in lower
+                or "looks similar to" in lower
+            ):
+                findings["Brand impersonation"] = "Indicator detected"
+
+            if (
+                "redirected to a different registered domain" in lower
+                or "moved across several different registered domains" in lower
+            ):
+                findings["Suspicious redirects"] = "Indicator detected"
+
+            if (
+                "login form sends information to a different registered domain" in lower
+                or "form on the page sends information to a different registered domain" in lower
+            ):
+                findings["Unsafe form destination"] = "Indicator detected"
+
+        return findings
+
+    def screenshot_chunks(path):
+        """
+        Split tall screenshots into page-sized pieces.
+        """
+        if not path or not os.path.exists(path):
+            story.append(
+                Paragraph(
+                    "No screenshot was captured.",
+                    small_style
+                )
+            )
+            return
+
+        try:
+            image = cv2.imread(path)
+
+            if image is None:
+                raise ValueError("Screenshot could not be opened.")
+
+            height_px, width_px = image.shape[:2]
+
+            # Aim for chunks that fit nicely on an A4 content area.
+            chunk_height = max(
+                850,
+                int(width_px * 1.30)
+            )
+
+            total = max(
+                1,
+                (height_px + chunk_height - 1) // chunk_height
+            )
+
+            for i in range(total):
+                start_y = i * chunk_height
+                end_y = min(
+                    height_px,
+                    start_y + chunk_height
+                )
+
+                chunk = image[start_y:end_y, 0:width_px]
+
+                ok, encoded = cv2.imencode(
+                    ".png",
+                    chunk
+                )
+
+                if not ok:
+                    continue
+
+                chunk_buffer = io.BytesIO(
+                    encoded.tobytes()
+                )
+
+                reader = ImageReader(
+                    chunk_buffer
+                )
+
+                chunk_w, chunk_h = reader.getSize()
+
+                max_width = document.width
+                max_height = 225 * mm
+
+                scale = min(
+                    max_width / chunk_w,
+                    max_height / chunk_h
+                )
+
+                if i > 0:
+                    story.append(
+                        PageBreak()
+                    )
+
+                story.append(
+                    Paragraph(
+                        (
+                            "Full website screenshot"
+                            if total == 1
+                            else (
+                                f"Full website screenshot "
+                                f"({i + 1} of {total})"
+                            )
+                        ),
+                        section_style
+                    )
+                )
+
+                story.append(
+                    RLImage(
+                        chunk_buffer,
+                        width=chunk_w * scale,
+                        height=chunk_h * scale
+                    )
+                )
+
+        except Exception as error:
+            story.append(
+                Paragraph(
+                    (
+                        "Screenshot could not be embedded: "
+                        f"{report_safe_text(error)}"
+                    ),
+                    small_style
+                )
+            )
+
+    # --------------------------------------------------------
+    # Executive summary
+    # --------------------------------------------------------
 
     story.append(
         Paragraph(
@@ -3796,888 +4134,533 @@ def make_pdf_report(result):
 
     story.append(
         Paragraph(
-            "by bipzilla",
-            byline_style
+            f"by bipzilla | Generated {generated}",
+            subtitle_style
         )
     )
 
-    generated = datetime.now(
-        timezone.utc
-    ).strftime(
-        "%Y-%m-%d %H:%M:%S UTC"
-    )
-
-    verdict = result.get(
-        "verdict",
-        "Unable to Check"
-    )
-
-    confidence_label, confidence_message = get_analysis_confidence(
-        result
-    )
-
-    score = result.get(
-        "score",
-        0
-    )
-
-    domain = (
-        result.get(
-            "registered_domain"
-        )
-        or result.get(
-            "hostname"
-        )
-        or result.get(
-            "url",
-            "Unknown"
-        )
-    )
-
-    verdict_colours = {
+    verdict_bg = {
         "Low Risk": "#DFF4E7",
         "Caution": "#FFF4D2",
         "Suspicious": "#FFE9D4",
         "High Risk": "#FBDEDE",
         "Unable to Check": "#EEF1F4",
-    }
+    }.get(verdict, "#EEF1F4")
 
-    verdict_text_colours = {
+    verdict_fg = {
         "Low Risk": "#14532D",
         "Caution": "#745000",
         "Suspicious": "#82400C",
         "High Risk": "#831B1B",
         "Unable to Check": "#344054",
-    }
+    }.get(verdict, "#344054")
 
-    verdict_table = Table(
+    summary = Table(
         [
             [
                 Paragraph(
-                    f"<b>{report_safe_text(domain)}</b><br/>"
-                    f"<font size='7'>{report_safe_text(result.get('site_status', 'Unknown'))}</font>",
+                    (
+                        f"<font size='7'>WEBSITE</font><br/>"
+                        f"<b>{report_safe_text(domain)}</b><br/>"
+                        f"<font size='7'>{report_safe_text(result.get('site_status', 'Unknown'))}</font>"
+                    ),
                     body_style
                 ),
                 Paragraph(
-                    f"<b>{report_safe_text(verdict)}</b><br/>"
-                    f"<font size='7'>Yeti score: {report_safe_text(score)}/100</font>",
+                    (
+                        f"<font size='7'>YETI VERDICT</font><br/>"
+                        f"<b>{report_safe_text(verdict)}</b><br/>"
+                        f"<font size='7'>Score: {report_safe_text(score)}/100</font>"
+                    ),
                     body_style
                 ),
             ]
         ],
         colWidths=[
-            115 * mm,
-            45 * mm
-        ],
+            document.width * 0.67,
+            document.width * 0.33
+        ]
     )
 
-    verdict_table.setStyle(
+    summary.setStyle(
         TableStyle(
             [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(verdict_bg)),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(verdict_fg)),
+                ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#CBD5E1")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ]
+        )
+    )
+
+    story.append(summary)
+    story.append(Spacer(1, 2.5 * mm))
+
+    story.append(
+        kv_table(
+            [
+                ("Original URL", result.get("url", "Unknown")),
+                ("Final URL", result.get("final_url", "Unknown")),
+                ("HTTP status", result.get("status_code", "Unknown")),
+                ("Website status", result.get("site_status", "Unknown")),
                 (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, -1),
-                    colors.HexColor(
-                        verdict_colours.get(
-                            verdict,
-                            "#EEF1F4"
-                        )
-                    ),
+                    "Analysis time",
+                    (
+                        f"{result.get('analysis_seconds', 0):.1f} seconds"
+                        if result.get("analysis_seconds") is not None
+                        else "Unknown"
+                    )
                 ),
                 (
-                    "TEXTCOLOR",
-                    (0, 0),
-                    (-1, -1),
-                    colors.HexColor(
-                        verdict_text_colours.get(
-                            verdict,
-                            "#344054"
-                        )
-                    ),
-                ),
-                (
-                    "BOX",
-                    (0, 0),
-                    (-1, -1),
-                    0.7,
-                    colors.HexColor("#CBD5E1"),
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE",
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8,
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8,
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8,
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8,
+                    "Browser preview",
+                    page_data.get("preview_status", "Unknown")
                 ),
             ]
         )
     )
 
-    story.append(
-        verdict_table
-    )
+    # --------------------------------------------------------
+    # Threat / behaviour assessment
+    # --------------------------------------------------------
 
-    story.append(
-        Spacer(
-            1,
-            4 * mm
-        )
-    )
+    section("Website behaviour and threat assessment")
 
-    meta_table = Table(
-        [
-            [
-                Paragraph(
-                    "<b>Generated</b>",
-                    small_style
-                ),
-                Paragraph(
-                    report_safe_text(
-                        generated
-                    ),
-                    small_style
-                ),
-            ],
-            [
-                Paragraph(
-                    "<b>Original URL</b>",
-                    small_style
-                ),
-                Paragraph(
-                    report_safe_text(
-                        result.get(
-                            "url",
-                            "Unknown"
-                        )
-                    ),
-                    small_style
-                ),
-            ],
-            [
-                Paragraph(
-                    "<b>Final URL</b>",
-                    small_style
-                ),
-                Paragraph(
-                    report_safe_text(
-                        result.get(
-                            "final_url",
-                            "Unknown"
-                        )
-                    ),
-                    small_style
-                ),
-            ],
-        ],
-        colWidths=[
-            35 * mm,
-            125 * mm
-        ],
-    )
+    behaviour = threat_assessment()
 
-    meta_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.4,
-                    colors.HexColor("#D7DEE7"),
-                ),
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (0, -1),
-                    colors.HexColor("#F3F6F9"),
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "TOP",
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-            ]
-        )
-    )
-
-    story.append(
-        meta_table
-    )
-
-    # Screenshot
-    screenshot = result.get(
-        "page",
-        {}
-    ).get(
-        "screenshot"
-    )
-
-    if (
-        screenshot
-        and os.path.exists(
-            screenshot
-        )
-    ):
-        story.append(
-            Paragraph(
-                "Full website screenshot",
-                section_style
-            )
-        )
-
-        try:
-            image_reader = ImageReader(
-                screenshot
-            )
-            width_px, height_px = (
-                image_reader.getSize()
-            )
-
-            max_width = 160 * mm
-            max_height = 220 * mm
-
-            scale = min(
-                max_width / width_px,
-                max_height / height_px,
-                1
-            )
-
-            pdf_image = RLImage(
-                screenshot,
-                width=width_px * scale,
-                height=height_px * scale
-            )
-
-            story.append(
-                pdf_image
-            )
-
-        except Exception:
-            story.append(
-                Paragraph(
-                    "Screenshot was captured but could not be embedded in the report.",
-                    small_style
-                )
-            )
-
-    story.append(
-        Paragraph(
-            "Website and connection details",
-            section_style
-        )
-    )
-
-    rdap = result.get(
-        "rdap",
-        {}
-    )
-    tls = result.get(
-        "tls",
-        {}
-    )
-
-    age = rdap.get(
-        "age_days"
-    )
-
-    expiry = tls.get(
-        "expires",
-        "Unknown"
-    )
-
-    days_left = certificate_days_left(
-        expiry
-    )
-
-    if days_left is None:
-        certificate_expiry = (
-            str(
-                expiry
-            )
-            if expiry
-            else "Unknown"
-        )
-    elif days_left < 0:
-        certificate_expiry = (
-            f"Expired ({expiry})"
-        )
-    else:
-        certificate_expiry = (
-            f"{days_left} days remaining ({expiry})"
-        )
-
-    detail_rows = [
-        ("HTTP status", result.get("status_code", "Unknown")),
-        ("Website status", result.get("site_status", "Unknown")),
-        (
-            "Analysis confidence",
-            f"{confidence_label} - {confidence_message}"
-        ),
-        ("Content type", result.get("content_type", "Unknown")),
-        ("Server", result.get("server", "Unknown")),
-        ("Hostname", result.get("hostname", "Unknown")),
-        ("Registered domain", result.get("registered_domain", "Unknown")),
-        (
-            "IP addresses",
-            ", ".join(
-                result.get(
-                    "ip_addresses",
-                    []
-                )
-            )
-            or "Unknown"
-        ),
-        (
-            "Domain age",
-            (
-                f"{age} days"
-                if age is not None
-                else "Unknown"
-            )
-        ),
-        ("Registrar", rdap.get("registrar", "Unknown")),
-        (
-            "HTTPS certificate",
-            (
-                "Valid"
-                if tls.get("valid")
-                else "Not validated"
-            )
-        ),
-        ("Certificate issuer", tls.get("issuer", "Unknown")),
-        ("Certificate expiry", certificate_expiry),
+    behaviour_rows = [
+        (name, status)
+        for name, status in behaviour.items()
     ]
 
-    table_data = []
-
-    for label, value in detail_rows:
-        table_data.append(
-            [
-                Paragraph(
-                    f"<b>{report_safe_text(label)}</b>",
-                    small_style
-                ),
-                Paragraph(
-                    report_safe_text(
-                        value
-                    ),
-                    small_style
-                ),
-            ]
-        )
-
-    details_table = Table(
-        table_data,
-        colWidths=[
-            43 * mm,
-            117 * mm
-        ],
-        repeatRows=0,
-    )
-
-    details_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.35,
-                    colors.HexColor("#D7DEE7"),
-                ),
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (0, -1),
-                    colors.HexColor("#F6F8FA"),
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "TOP",
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4,
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4,
-                ),
-            ]
-        )
+    behaviour_rows.extend(
+        [
+            (
+                "Page title",
+                page_data.get("title", "Unknown") or "Unknown"
+            ),
+            (
+                "Site name",
+                page_data.get("site_name", "Unknown") or "Unknown"
+            ),
+            (
+                "Main heading",
+                page_data.get("heading", "Unknown") or "Unknown"
+            ),
+            (
+                "Password field",
+                "Yes" if page_data.get("password_field") else "No"
+            ),
+            (
+                "Email / username field",
+                "Yes" if page_data.get("email_field") else "No"
+            ),
+        ]
     )
 
     story.append(
-        details_table
+        kv_table(
+            behaviour_rows
+        )
     )
 
+    # --------------------------------------------------------
+    # Key findings
+    # --------------------------------------------------------
+
+    section("Investigation findings")
+
+    findings = clean_report_findings(result)
+
+    if findings:
+        add_bullets(findings)
+    else:
+        story.append(
+            Paragraph(
+                (
+                    "No major phishing indicators were found by the checks "
+                    "that completed. This does not prove the website is genuine."
+                ),
+                small_style
+            )
+        )
+
+    # --------------------------------------------------------
+    # Reputation
+    # --------------------------------------------------------
+
+    section("Reputation and threat intelligence")
+
+    reputation_rows = []
+
+    threat_types = google.get("threat_types", []) or []
+
+    if google.get("confirmed"):
+        threat_labels = []
+
+        if "SOCIAL_ENGINEERING" in threat_types:
+            threat_labels.append("phishing / social engineering")
+
+        if "MALWARE" in threat_types:
+            threat_labels.append("malware")
+
+        reputation_rows.append(
+            (
+                "Live URL reputation",
+                (
+                    "Reported for "
+                    + (
+                        " and ".join(threat_labels)
+                        if threat_labels
+                        else "unsafe activity"
+                    )
+                )
+            )
+        )
+    elif google.get("checked"):
+        reputation_rows.append(
+            ("Live URL reputation", "No known match")
+        )
+    else:
+        reputation_rows.append(
+            ("Live URL reputation", "Check unavailable")
+        )
+
+    reputation_rows.extend(
+        [
+            (
+                "PhishTank",
+                (
+                    "Verified phishing match"
+                    if phishtank.get("confirmed")
+                    else (
+                        "No verified match"
+                        if phishtank.get("checked")
+                        else "Check unavailable"
+                    )
+                )
+            ),
+            (
+                "OpenPhish",
+                (
+                    "Listed in phishing feed"
+                    if openphish.get("confirmed")
+                    else (
+                        "No match found"
+                        if openphish.get("checked")
+                        else "Check unavailable"
+                    )
+                )
+            ),
+        ]
+    )
+
+    if not urlscan.get("configured"):
+        urlscan_status = "Not configured"
+    elif not urlscan.get("checked"):
+        urlscan_status = urlscan.get("error") or "Check unavailable"
+    elif urlscan.get("malicious_found"):
+        urlscan_status = (
+            f"{urlscan.get('malicious_count', 0)} recent malicious scan(s)"
+        )
+    elif urlscan.get("recent_count", 0):
+        urlscan_status = (
+            f"{urlscan.get('recent_count', 0)} recent scan(s), "
+            "no malicious verdict found"
+        )
+    else:
+        urlscan_status = "No recent scans found"
+
+    reputation_rows.append(
+        ("urlscan.io history", urlscan_status)
+    )
+
+    for label, key in (
+        ("urlscan last seen", "last_seen"),
+        ("urlscan latest title", "latest_title"),
+        ("urlscan latest IP", "latest_ip"),
+        ("urlscan country", "latest_country"),
+    ):
+        if urlscan.get(key):
+            reputation_rows.append(
+                (label, urlscan.get(key))
+            )
+
+    if urlscan.get("categories"):
+        reputation_rows.append(
+            (
+                "urlscan categories",
+                ", ".join(urlscan.get("categories", []))
+            )
+        )
+
+    if urlscan.get("brands"):
+        reputation_rows.append(
+            (
+                "urlscan detected brands",
+                ", ".join(urlscan.get("brands", []))
+            )
+        )
+
+    story.append(
+        kv_table(
+            reputation_rows
+        )
+    )
+
+    # --------------------------------------------------------
     # Redirects
-    story.append(
-        Paragraph(
-            "Redirect chain",
-            section_style
-        )
-    )
+    # --------------------------------------------------------
+
+    section("Redirect analysis")
 
     redirect_chain = []
 
-    original_url = result.get(
-        "url"
-    )
+    original_url = result.get("url")
 
     if original_url:
-        redirect_chain.append(
-            original_url
+        redirect_chain.append(original_url)
+
+    for redirect in result.get("redirects", []):
+        candidate = (
+            redirect.get("url")
+            if isinstance(redirect, dict)
+            else str(redirect)
         )
 
-    for redirect in result.get(
-        "redirects",
-        []
-    ):
-        if isinstance(
-            redirect,
-            dict
-        ):
-            candidate = (
-                redirect.get(
-                    "url"
-                )
-                or redirect.get(
-                    "location"
-                )
-                or str(
-                    redirect
-                )
-            )
-        else:
-            candidate = str(
-                redirect
-            )
+        if candidate and candidate not in redirect_chain:
+            redirect_chain.append(candidate)
 
-        if (
-            candidate
-            and candidate not in redirect_chain
-        ):
-            redirect_chain.append(
-                candidate
-            )
+    final_url = result.get("final_url")
 
-    final_url = result.get(
-        "final_url"
+    if final_url and final_url not in redirect_chain:
+        redirect_chain.append(final_url)
+
+    redirect_domains = []
+
+    for item in redirect_chain:
+        d = get_registered_domain(
+            get_hostname(item)
+        )
+        if d and d not in redirect_domains:
+            redirect_domains.append(d)
+
+    story.append(
+        kv_table(
+            [
+                (
+                    "Redirect count",
+                    max(0, len(redirect_chain) - 1)
+                ),
+                (
+                    "Registered domains involved",
+                    ", ".join(redirect_domains) or "Unknown"
+                ),
+                (
+                    "Domain changes",
+                    max(0, len(redirect_domains) - 1)
+                ),
+            ]
+        )
     )
 
-    if (
-        final_url
-        and final_url not in redirect_chain
-    ):
-        redirect_chain.append(
-            final_url
-        )
+    story.append(Spacer(1, 1.5 * mm))
 
     if redirect_chain:
-        for index, redirect_url in enumerate(
+        for index, item in enumerate(
             redirect_chain,
             start=1
         ):
             story.append(
                 Paragraph(
-                    f"{index}. {report_safe_text(redirect_url)}",
-                    small_style
+                    f"{index}. {report_safe_text(item)}",
+                    tiny_style
                 )
             )
     else:
         story.append(
             Paragraph(
-                "No redirect information was recorded.",
+                "No redirect information recorded.",
                 small_style
             )
         )
 
-    # Reputation
+    # --------------------------------------------------------
+    # Domain / network / TLS
+    # --------------------------------------------------------
+
+    section("Domain, network and certificate details")
+
+    age = rdap.get("age_days")
+
+    expiry = tls.get("expires", "Unknown")
+    days_left = certificate_days_left(expiry)
+
+    if days_left is None:
+        expiry_text = expiry or "Unknown"
+    elif days_left < 0:
+        expiry_text = f"Expired ({expiry})"
+    else:
+        expiry_text = f"{days_left} days remaining ({expiry})"
+
+    technical_rows = [
+        ("Hostname", result.get("hostname", "Unknown")),
+        ("Registered domain", result.get("registered_domain", "Unknown")),
+        (
+            "IP addresses",
+            ", ".join(result.get("ip_addresses", [])) or "Unknown"
+        ),
+        (
+            "Domain age",
+            f"{age} days" if age is not None else "Unknown"
+        ),
+        ("Registrar", rdap.get("registrar", "Unknown")),
+        ("Content type", result.get("content_type", "Unknown")),
+        ("Server header", result.get("server", "Unknown")),
+        (
+            "HTTPS certificate",
+            "Valid" if tls.get("valid") else "Not validated"
+        ),
+        ("Certificate issuer", tls.get("issuer", "Unknown")),
+        ("Certificate expiry", expiry_text),
+    ]
+
     story.append(
-        Paragraph(
-            "Reputation checks",
-            section_style
+        kv_table(
+            technical_rows
         )
     )
 
-    for reputation_line in friendly_reputation_text(
-        result
-    ):
-        story.append(
-            Paragraph(
-                report_safe_text(
-                    reputation_line
-                ),
-                small_style
-            )
-        )
+    # --------------------------------------------------------
+    # Forms and page behaviour
+    # --------------------------------------------------------
 
-    # Browser/page checks
-    story.append(
-        Paragraph(
-            "Page behaviour",
-            section_style
-        )
-    )
+    section("Forms and credential behaviour")
 
-    page = result.get(
-        "page",
-        {}
-    )
+    forms = page_data.get("forms", []) or []
 
-    page_rows = [
+    form_rows = [
         (
-            "Preview status",
-            page.get(
-                "preview_status",
-                "Unknown"
-            )
+            "Password input detected",
+            "Yes" if page_data.get("password_field") else "No"
         ),
         (
-            "Page title",
-            page.get(
-                "title",
-                "Unknown"
-            )
-            or "Unknown"
+            "Email / username input detected",
+            "Yes" if page_data.get("email_field") else "No"
         ),
         (
-            "Site name",
-            page.get(
-                "site_name",
-                "Unknown"
-            )
-            or "Unknown"
-        ),
-        (
-            "Heading",
-            page.get(
-                "h1",
-                "Unknown"
-            )
-            or "Unknown"
-        ),
-        (
-            "Password field detected",
-            (
-                "Yes"
-                if page.get(
-                    "password_field"
-                )
-                else "No"
-            )
-        ),
-        (
-            "Email field detected",
-            (
-                "Yes"
-                if page.get(
-                    "email_field"
-                )
-                else "No"
-            )
+            "Number of forms found",
+            len(forms)
         ),
     ]
 
-    form_actions = page.get(
-        "forms",
-        []
-    )
-
-    page_rows.append(
-        (
-            "Form destinations",
-            (
-                ", ".join(
-                    str(
-                        item
-                    )
-                    for item in form_actions
-                    if item
-                )
-                if form_actions
-                else "None detected"
-            )
-        )
-    )
-
-    page_table_data = []
-
-    for label, value in page_rows:
-        page_table_data.append(
-            [
-                Paragraph(
-                    f"<b>{report_safe_text(label)}</b>",
-                    small_style
-                ),
-                Paragraph(
-                    report_safe_text(
-                        value
-                    ),
-                    small_style
-                ),
-            ]
-        )
-
-    page_table = Table(
-        page_table_data,
-        colWidths=[
-            43 * mm,
-            117 * mm
-        ]
-    )
-
-    page_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.35,
-                    colors.HexColor("#D7DEE7"),
-                ),
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (0, -1),
-                    colors.HexColor("#F6F8FA"),
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "TOP",
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    5,
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4,
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4,
-                ),
-            ]
-        )
-    )
-
     story.append(
-        page_table
-    )
-
-    # Previous activity
-    history = result.get(
-        "local_history",
-        {}
-    )
-
-    story.append(
-        Paragraph(
-            "Yeti history",
-            section_style
+        kv_table(
+            form_rows
         )
     )
 
-    if history.get(
-        "scan_count",
-        0
-    ) > 0:
-        history_lines = [
-            (
-                "Previous checks",
-                history.get(
-                    "scan_count",
-                    0
-                )
-            ),
-            (
-                "First checked",
-                history.get(
-                    "first_seen",
-                    "Unknown"
-                )
-            ),
-            (
-                "Last checked",
-                history.get(
-                    "last_seen",
-                    "Unknown"
-                )
-            ),
-            (
-                "Previous verdict",
-                history.get(
-                    "last_verdict",
-                    "Unknown"
-                )
-            ),
-            (
-                "Highest previous verdict",
-                history.get(
-                    "highest_verdict",
-                    "Unknown"
-                )
-            ),
-        ]
-
-        for label, value in history_lines:
-            story.append(
-                Paragraph(
-                    f"<b>{report_safe_text(label)}:</b> "
-                    f"{report_safe_text(value)}",
-                    small_style
-                )
-            )
-    else:
+    if forms:
+        story.append(Spacer(1, 1.5 * mm))
         story.append(
             Paragraph(
-                "No previous local Yeti checks were recorded for this domain before this scan.",
+                "<b>Form destinations</b>",
                 small_style
             )
         )
 
-    # Findings
-    story.append(
-        Paragraph(
-            "Investigation findings",
-            section_style
-        )
-    )
-
-    findings = clean_report_findings(
-        result
-    )
-
-    if findings:
-        for index, finding in enumerate(
-            findings,
+        for index, action in enumerate(
+            forms,
             start=1
         ):
             story.append(
                 Paragraph(
-                    f"{index}. {report_safe_text(finding)}",
-                    small_style
+                    f"{index}. {report_safe_text(action or 'No explicit action')}",
+                    tiny_style
                 )
             )
+
+    # --------------------------------------------------------
+    # Local history
+    # --------------------------------------------------------
+
+    section("Yeti investigation history")
+
+    if history.get("scan_count", 0) > 0:
+        history_rows = [
+            ("Previous checks", history.get("scan_count", 0)),
+            ("First checked", history.get("first_seen", "Unknown")),
+            ("Last checked", history.get("last_seen", "Unknown")),
+            ("Previous verdict", history.get("last_verdict", "Unknown")),
+            (
+                "Highest previous verdict",
+                history.get("highest_verdict", "Unknown")
+            ),
+            (
+                "Highest previous score",
+                history.get("highest_score", "Unknown")
+            ),
+        ]
+
+        story.append(
+            kv_table(
+                history_rows
+            )
+        )
     else:
         story.append(
             Paragraph(
-                "No major warning signs were found by the checks that completed.",
+                (
+                    "No previous Yeti checks were recorded for this domain "
+                    "before this investigation."
+                ),
                 small_style
             )
         )
 
-    # Disclaimer
+    # --------------------------------------------------------
+    # Screenshot last, split across pages
+    # --------------------------------------------------------
+
     story.append(
-        Spacer(
-            1,
-            5 * mm
-        )
+        PageBreak()
+    )
+
+    screenshot_chunks(
+        page_data.get("screenshot")
+    )
+
+    # --------------------------------------------------------
+    # Final analyst note
+    # --------------------------------------------------------
+
+    story.append(
+        Spacer(1, 3 * mm)
     )
 
     story.append(
         Paragraph(
-            "<b>Investigation note</b><br/>"
-            "Yeti Check is an investigation aid. A Low Risk result does not prove "
-            "that a website is genuine, and a failed or unavailable check is not "
-            "evidence that a website is malicious. Validate sensitive requests "
-            "through an independent trusted channel.",
-            small_style
+            (
+                "<b>Investigation note</b><br/>"
+                "Yeti Check is an investigation aid. A Low Risk result does not "
+                "prove that a website is genuine. A blocked or unavailable check "
+                "is not evidence that a website is malicious. For sensitive requests, "
+                "verify the sender and destination using an independent trusted channel."
+            ),
+            tiny_style
         )
     )
 
     document.build(
-        story
+        story,
+        onFirstPage=draw_frame,
+        onLaterPages=draw_frame
     )
 
-    buffer.seek(
-        0
-    )
-
+    buffer.seek(0)
     return buffer.getvalue()
 
 
