@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import socket
@@ -2809,7 +2808,11 @@ def inspect_page(browser_url):
         "forms": [],
         "screenshot": None,
         "preview_status": "unknown",
-        "preview_message": ""
+        "preview_message": "",
+        "browser_final_url": browser_url,
+        "navigation_urls": [],
+        "document_responses": [],
+        "browser_status_code": None
     }
 
     file_id = hashlib.sha256(
@@ -2890,6 +2893,56 @@ def inspect_page(browser_url):
 
             page = context.new_page()
 
+            navigation_urls = []
+            document_responses = []
+
+            def record_main_frame_navigation(frame):
+                try:
+                    if frame == page.main_frame:
+                        current = frame.url
+
+                        if (
+                            current
+                            and current.startswith(
+                                ("http://", "https://")
+                            )
+                            and current not in navigation_urls
+                        ):
+                            navigation_urls.append(
+                                current
+                            )
+                except Exception:
+                    pass
+
+            def record_document_response(response_item):
+                try:
+                    request_item = response_item.request
+
+                    if (
+                        request_item.is_navigation_request()
+                        and response_item.url.startswith(
+                            ("http://", "https://")
+                        )
+                    ):
+                        document_responses.append(
+                            {
+                                "url": response_item.url,
+                                "status": response_item.status
+                            }
+                        )
+                except Exception:
+                    pass
+
+            page.on(
+                "framenavigated",
+                record_main_frame_navigation
+            )
+
+            page.on(
+                "response",
+                record_document_response
+            )
+
             # Secondary download protection. accept_downloads=False already
             # prevents normal downloads, but cancel any attempted download too.
             try:
@@ -2917,10 +2970,76 @@ def inspect_page(browser_url):
                     error
                 )
 
+            # A tracking/masking page may return HTTP 200 and redirect later
+            # using JavaScript or a meta refresh. Wait for the main-frame URL
+            # to stabilise instead of assuming page.goto() found the final URL.
             try:
-                page.wait_for_timeout(
-                    1800
+                previous_url = ""
+                stable_rounds = 0
+
+                for _ in range(8):
+                    page.wait_for_timeout(
+                        500
+                    )
+
+                    current_url = page.url
+
+                    if current_url == previous_url:
+                        stable_rounds += 1
+                    else:
+                        stable_rounds = 0
+                        previous_url = current_url
+
+                    if stable_rounds >= 2:
+                        break
+            except Exception:
+                pass
+
+            try:
+                current_browser_url = page.url
+
+                if (
+                    current_browser_url
+                    and current_browser_url.startswith(
+                        ("http://", "https://")
+                    )
+                ):
+                    result["browser_final_url"] = (
+                        current_browser_url
+                    )
+
+                    if (
+                        current_browser_url
+                        not in navigation_urls
+                    ):
+                        navigation_urls.append(
+                            current_browser_url
+                        )
+
+                result["navigation_urls"] = list(
+                    navigation_urls
                 )
+
+                result["document_responses"] = list(
+                    document_responses
+                )
+
+                for document_response in reversed(
+                    document_responses
+                ):
+                    if (
+                        document_response.get(
+                            "url"
+                        )
+                        == result["browser_final_url"]
+                    ):
+                        result["browser_status_code"] = (
+                            document_response.get(
+                                "status"
+                            )
+                        )
+                        break
+
             except Exception:
                 pass
 
@@ -2970,6 +3089,29 @@ def inspect_page(browser_url):
                     pass
 
             if blocked:
+                try:
+                    current_browser_url = page.url
+
+                    if (
+                        current_browser_url
+                        and current_browser_url.startswith(
+                            ("http://", "https://")
+                        )
+                    ):
+                        result["browser_final_url"] = (
+                            current_browser_url
+                        )
+
+                    result["navigation_urls"] = list(
+                        navigation_urls
+                    )
+
+                    result["document_responses"] = list(
+                        document_responses
+                    )
+                except Exception:
+                    pass
+
                 result["preview_status"] = "blocked"
 
                 result["preview_message"] = (
@@ -3202,6 +3344,54 @@ def is_known_auth_service(domain):
 # ANALYSE URL
 # ------------------------------------------------------------
 
+def combine_redirect_chains(
+    original_url,
+    http_redirects,
+    browser_navigation_urls,
+    browser_final_url
+):
+    """
+    Merge server-side HTTP redirects with browser-side navigations.
+
+    Browser-side navigation is important for tracking/security wrappers that
+    return HTTP 200 and then forward the user with JavaScript/meta refresh.
+    """
+    chain = []
+
+    def add(item):
+        if not item:
+            return
+
+        if not str(item).startswith(
+            ("http://", "https://")
+        ):
+            return
+
+        if item == original_url:
+            return
+
+        if item not in chain:
+            chain.append(
+                item
+            )
+
+    for item in http_redirects or []:
+        add(
+            item
+        )
+
+    for item in browser_navigation_urls or []:
+        add(
+            item
+        )
+
+    add(
+        browser_final_url
+    )
+
+    return chain
+
+
 def analyse_url(url):
     """
     Analyse one URL.
@@ -3353,7 +3543,11 @@ def analyse_url(url):
                         "preview_status": "failed",
                         "preview_message": (
                             "The website preview could not be loaded."
-                        )
+                        ),
+                        "browser_final_url": url,
+                        "navigation_urls": [],
+                        "document_responses": [],
+                        "browser_status_code": None
                     }
                 else:
                     result[name] = {
@@ -3370,6 +3564,179 @@ def analyse_url(url):
             "issuer": "Unknown",
             "expires": "Unknown"
         }
+
+    # --------------------------------------------------------
+    # Browser-discovered redirect destination
+    # --------------------------------------------------------
+    # HTTP tracking services can return 200 and then redirect with JS or
+    # meta refresh. Playwright sees those navigations, so merge them into
+    # the redirect chain and make the actual browser destination authoritative.
+    browser_final_url = result.get(
+        "page",
+        {}
+    ).get(
+        "browser_final_url"
+    )
+
+    browser_navigation_urls = result.get(
+        "page",
+        {}
+    ).get(
+        "navigation_urls",
+        []
+    )
+
+    combined_redirects = combine_redirect_chains(
+        url,
+        redirects,
+        browser_navigation_urls,
+        browser_final_url
+    )
+
+    if combined_redirects:
+        result["redirects"] = combined_redirects
+
+    actual_final_url = (
+        browser_final_url
+        if (
+            browser_final_url
+            and browser_final_url.startswith(
+                ("http://", "https://")
+            )
+        )
+        else final_url
+    )
+
+    # If the browser escaped a masking/tracking domain, run the important
+    # checks again against the REAL destination rather than the wrapper.
+    if (
+        actual_final_url
+        and actual_final_url != final_url
+    ):
+        actual_hostname = get_hostname(
+            actual_final_url
+        )
+
+        actual_registered_domain = get_registered_domain(
+            actual_hostname
+        )
+
+        safe_actual, safe_message = check_host_is_safe(
+            actual_hostname
+        )
+
+        if safe_actual:
+            result["final_url"] = actual_final_url
+            result["hostname"] = actual_hostname
+            result["registered_domain"] = (
+                actual_registered_domain
+            )
+            result["ip_addresses"] = resolve_ip(
+                actual_hostname
+            )
+
+            final_url = actual_final_url
+            hostname = actual_hostname
+            registered_domain = (
+                actual_registered_domain
+            )
+            redirects = combined_redirects
+
+            second_jobs = {}
+
+            with ThreadPoolExecutor(
+                max_workers=6,
+                thread_name_prefix="yeti-final"
+            ) as final_executor:
+                second_jobs[
+                    "google_webrisk"
+                ] = final_executor.submit(
+                    check_google_webrisk_chain,
+                    url,
+                    combined_redirects,
+                    actual_final_url
+                )
+
+                second_jobs[
+                    "urlscan"
+                ] = final_executor.submit(
+                    check_urlscan_history,
+                    actual_hostname
+                )
+
+                second_jobs[
+                    "phish_tank"
+                ] = final_executor.submit(
+                    check_phishtank,
+                    actual_final_url
+                )
+
+                second_jobs[
+                    "openphish"
+                ] = final_executor.submit(
+                    check_openphish,
+                    actual_final_url
+                )
+
+                second_jobs[
+                    "rdap"
+                ] = final_executor.submit(
+                    get_rdap_information,
+                    actual_registered_domain
+                )
+
+                if actual_final_url.startswith(
+                    "https://"
+                ):
+                    second_jobs[
+                        "tls"
+                    ] = final_executor.submit(
+                        get_tls_information,
+                        actual_hostname
+                    )
+
+                for name, future in second_jobs.items():
+                    try:
+                        result[name] = future.result()
+                    except Exception:
+                        pass
+
+            if not actual_final_url.startswith(
+                "https://"
+            ):
+                result["tls"] = {
+                    "valid": False,
+                    "issuer": "Unknown",
+                    "expires": "Unknown"
+                }
+
+            # History should also be associated with the real destination.
+            result["local_history"] = get_local_history(
+                actual_registered_domain
+            )
+
+            result["reasons"].append(
+                (
+                    "The original link used a tracking or masking page. "
+                    f"The browser ultimately navigated to {actual_registered_domain}."
+                )
+            )
+
+            # Use the browser's final document status when available.
+            browser_status = result.get(
+                "page",
+                {}
+            ).get(
+                "browser_status_code"
+            )
+
+            if browser_status is not None:
+                result["status_code"] = (
+                    browser_status
+                )
+                result["site_status"] = classify_http_status(
+                    browser_status
+                )
 
     # urlscan supporting evidence
     if result.get(
@@ -4601,7 +4968,7 @@ def make_pdf_report(result):
     # Redirects
     # --------------------------------------------------------
 
-    section("Redirect analysis")
+    section("Complete redirect analysis")
 
     redirect_chain = []
 
@@ -5539,6 +5906,42 @@ if submitted:
         # Everything technical stays in one place
         # ----------------------------------------------------
 
+        redirect_chain = result.get(
+            "redirects",
+            []
+        )
+
+        if redirect_chain:
+            with st.expander(
+                f"Redirect chain ({len(redirect_chain)} hop(s))",
+                expanded=True
+            ):
+                st.write(
+                    "Original:",
+                    result.get(
+                        "url",
+                        "Unknown"
+                    )
+                )
+
+                for redirect_index, redirect_url in enumerate(
+                    redirect_chain,
+                    start=1
+                ):
+                    label = (
+                        "Final"
+                        if redirect_url
+                        == result.get(
+                            "final_url"
+                        )
+                        else f"Hop {redirect_index}"
+                    )
+
+                    st.write(
+                        f"{label}:",
+                        redirect_url
+                    )
+
         with st.expander(
             "Why this result?"
         ):
@@ -5590,6 +5993,17 @@ if submitted:
                     result.get(
                         "final_url",
                         result["url"]
+                    )
+                ),
+                (
+                    "Redirects found",
+                    str(
+                        len(
+                            result.get(
+                                "redirects",
+                                []
+                            )
+                        )
                     )
                 ),
                 (
