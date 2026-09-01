@@ -1304,6 +1304,124 @@ def check_host_is_safe(hostname):
     return True, ""
 
 
+
+# ------------------------------------------------------------
+# SECURITY-LINK WRAPPER UNWRAPPING
+# ------------------------------------------------------------
+
+def unwrap_linkscan_url(url):
+    """
+    Reveal the destination embedded in a LinkScan rewritten URL.
+
+    Documented LinkScan format:
+        https://linkscan.io/scan/ux/<base64-target>/<scan-id>?...
+
+    This does not submit or visit the decoded target. It only decodes the
+    destination already embedded in the rewritten URL.
+    """
+    try:
+        parsed = urlparse(
+            url
+        )
+
+        hostname = (
+            parsed.hostname
+            or ""
+        ).lower()
+
+        if hostname not in (
+            "linkscan.io",
+            "www.linkscan.io"
+        ):
+            return None
+
+        parts = [
+            item
+            for item in parsed.path.split("/")
+            if item
+        ]
+
+        # Expected: /scan/ux/<encoded-target>/<scan-id>
+        if (
+            len(parts) < 3
+            or parts[0].lower() != "scan"
+            or parts[1].lower() != "ux"
+        ):
+            return None
+
+        encoded_target = parts[2]
+
+        # LinkScan examples use Base64. Add padding if omitted.
+        padding = "=" * (
+            (-len(encoded_target)) % 4
+        )
+
+        raw = base64.urlsafe_b64decode(
+            encoded_target + padding
+        )
+
+        decoded = raw.decode(
+            "utf-8",
+            errors="strict"
+        ).strip()
+
+        # Some rewritten examples contain "www.example.com" without a scheme.
+        if decoded.startswith(
+            "www."
+        ):
+            decoded = (
+                "https://"
+                + decoded
+            )
+
+        if not decoded.startswith(
+            ("http://", "https://")
+        ):
+            # A bare normal domain/path is also accepted.
+            if re.match(
+                r"^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:/.*)?$",
+                decoded
+            ):
+                decoded = (
+                    "https://"
+                    + decoded
+                )
+            else:
+                return None
+
+        target_host = get_hostname(
+            decoded
+        )
+
+        if not target_host:
+            return None
+
+        return decoded
+
+    except Exception:
+        return None
+
+
+def unwrap_known_security_link(url):
+    """
+    Return the destination exposed by a supported secure-link wrapper.
+
+    More wrapper formats can be added here later without weakening the
+    normal redirect protections.
+    """
+    linkscan_target = unwrap_linkscan_url(
+        url
+    )
+
+    if linkscan_target:
+        return {
+            "provider": "LinkScan",
+            "target_url": linkscan_target
+        }
+
+    return None
+
+
 # ------------------------------------------------------------
 # HTTP / REDIRECTS
 # ------------------------------------------------------------
@@ -3422,13 +3540,82 @@ def analyse_url(url):
         "google_webrisk": {},
         "urlscan": {},
         "local_history": {},
-        "analysis_seconds": 0.0
+        "analysis_seconds": 0.0,
+        "security_wrapper": {},
+        "unwrapped_url": None
     }
 
-    # This stays first because all later checks need the real destination.
-    response, final_url, redirects = safe_request(
+    # --------------------------------------------------------
+    # Reveal supported security-link wrappers before scanning
+    # --------------------------------------------------------
+    wrapper = unwrap_known_security_link(
         url
     )
+
+    scan_start_url = url
+    wrapper_hops = []
+
+    if wrapper:
+        unwrapped_url = wrapper.get(
+            "target_url"
+        )
+
+        if unwrapped_url:
+            # Apply the same SSRF/private-network protection before ever
+            # contacting the decoded destination.
+            unwrapped_hostname = get_hostname(
+                unwrapped_url
+            )
+
+            safe_unwrapped, unsafe_reason = check_host_is_safe(
+                unwrapped_hostname
+            )
+
+            if safe_unwrapped:
+                result["security_wrapper"] = wrapper
+                result["unwrapped_url"] = (
+                    unwrapped_url
+                )
+
+                scan_start_url = (
+                    unwrapped_url
+                )
+
+                wrapper_hops.append(
+                    unwrapped_url
+                )
+
+                result["reasons"].append(
+                    (
+                        f"{wrapper.get('provider', 'Security service')} "
+                        "rewrote the original address. Yeti revealed and "
+                        "analysed the embedded destination."
+                    )
+                )
+
+    # Follow real HTTP redirects beginning from the revealed target when one
+    # is available. This prevents the clean LinkScan wrapper from becoming
+    # the final reputation target.
+    response, final_url, http_redirects = safe_request(
+        scan_start_url
+    )
+
+    redirects = []
+
+    for hop in (
+        wrapper_hops
+        + list(
+            http_redirects
+        )
+    ):
+        if (
+            hop
+            and hop != url
+            and hop not in redirects
+        ):
+            redirects.append(
+                hop
+            )
 
     result["final_url"] = final_url
     result["redirects"] = redirects
@@ -3510,7 +3697,7 @@ def analyse_url(url):
 
         jobs["page"] = executor.submit(
             inspect_page,
-            url
+            scan_start_url
         )
 
         # Each helper already handles most errors itself. This fallback makes
@@ -4757,6 +4944,29 @@ def make_pdf_report(result):
         kv_table(
             [
                 ("Original URL", result.get("url", "Unknown")),
+                (
+                    "Security-link wrapper",
+                    (
+                        result.get(
+                            "security_wrapper",
+                            {}
+                        ).get(
+                            "provider",
+                            "None detected"
+                        )
+                        if result.get(
+                            "security_wrapper"
+                        )
+                        else "None detected"
+                    )
+                ),
+                (
+                    "Revealed destination",
+                    result.get(
+                        "unwrapped_url"
+                    )
+                    or "Not applicable"
+                ),
                 ("Final URL", result.get("final_url", "Unknown")),
                 ("HTTP status", result.get("status_code", "Unknown")),
                 ("Website status", result.get("site_status", "Unknown")),
@@ -5562,6 +5772,8 @@ if submitted:
                     "google_webrisk": {},
                     "urlscan": {},
                     "local_history": {},
+                    "security_wrapper": {},
+                    "unwrapped_url": None,
                     "analysis_seconds": round(
                         time.perf_counter()
                         - url_started,
@@ -5924,18 +6136,32 @@ if submitted:
                     )
                 )
 
+                revealed_destination = result.get(
+                    "unwrapped_url"
+                )
+
                 for redirect_index, redirect_url in enumerate(
                     redirect_chain,
                     start=1
                 ):
-                    label = (
-                        "Final"
-                        if redirect_url
-                        == result.get(
-                            "final_url"
+                    if (
+                        revealed_destination
+                        and redirect_url
+                        == revealed_destination
+                    ):
+                        label = (
+                            "Revealed destination"
                         )
-                        else f"Hop {redirect_index}"
-                    )
+
+                    elif redirect_url == result.get(
+                        "final_url"
+                    ):
+                        label = "Final"
+
+                    else:
+                        label = (
+                            f"Hop {redirect_index}"
+                        )
 
                     st.write(
                         f"{label}:",
@@ -5987,6 +6213,29 @@ if submitted:
                 (
                     "Original address",
                     result["url"]
+                ),
+                (
+                    "Security-link wrapper",
+                    (
+                        result.get(
+                            "security_wrapper",
+                            {}
+                        ).get(
+                            "provider",
+                            "None detected"
+                        )
+                        if result.get(
+                            "security_wrapper"
+                        )
+                        else "None detected"
+                    )
+                ),
+                (
+                    "Revealed destination",
+                    result.get(
+                        "unwrapped_url"
+                    )
+                    or "Not applicable"
                 ),
                 (
                     "Final address",
