@@ -2654,6 +2654,151 @@ def prepare_full_page_for_screenshot(page):
         pass
 
 
+def browser_request_is_safe(url):
+    """
+    Validate every network destination requested by Playwright.
+
+    This is separate from the initial requests-based SSRF protection because
+    a webpage can load scripts, images, iframes or perform fetch/XHR requests
+    to completely different hosts after the main document opens.
+    """
+    try:
+        parsed = urlparse(
+            url
+        )
+
+        scheme = (
+            parsed.scheme
+            or ""
+        ).lower()
+
+        # Local in-page resources do not contact another server.
+        if scheme in (
+            "data",
+            "blob",
+            "about"
+        ):
+            return True, ""
+
+        # Only normal web traffic is allowed out of the isolated browser.
+        if scheme not in (
+            "http",
+            "https"
+        ):
+            return (
+                False,
+                f"Blocked browser protocol: {scheme or 'unknown'}"
+            )
+
+        hostname = (
+            parsed.hostname
+            or ""
+        ).strip(
+            "."
+        ).lower()
+
+        if not hostname:
+            return (
+                False,
+                "Blocked browser request without a hostname"
+            )
+
+        if hostname in (
+            "localhost",
+            "localhost.localdomain"
+        ):
+            return (
+                False,
+                "Blocked browser request to localhost"
+            )
+
+        # Resolve at request time. This helps protect against pages that try
+        # to make subrequests to internal/private IP addresses.
+        addresses = resolve_ip(
+            hostname
+        )
+
+        if not addresses:
+            return (
+                False,
+                "Blocked browser request because the hostname did not resolve"
+            )
+
+        for address in addresses:
+            if is_private_or_local_ip(
+                address
+            ):
+                return (
+                    False,
+                    f"Blocked browser request to private/local address {address}"
+                )
+
+        return True, ""
+
+    except Exception as error:
+        return (
+            False,
+            f"Blocked browser request: {error}"
+        )
+
+
+def install_browser_network_guard(context):
+    """
+    Apply the network guard to every HTTP(S) request in the Playwright context.
+    """
+
+    def handle_route(route):
+        request_url = (
+            route.request.url
+            or ""
+        )
+
+        safe, reason = browser_request_is_safe(
+            request_url
+        )
+
+        if safe:
+            try:
+                route.continue_()
+            except Exception:
+                try:
+                    route.abort()
+                except Exception:
+                    pass
+        else:
+            try:
+                route.abort(
+                    "blockedbyclient"
+                )
+            except Exception:
+                try:
+                    route.abort()
+                except Exception:
+                    pass
+
+    context.route(
+        "**/*",
+        handle_route
+    )
+
+    # Block WebSockets when supported by the installed Playwright version.
+    # Yeti does not need them for phishing triage and they are another path
+    # a hostile page could use to contact internal services.
+    try:
+        def block_websocket(web_socket_route):
+            try:
+                web_socket_route.abort()
+            except Exception:
+                pass
+
+        context.route_web_socket(
+            "**/*",
+            block_websocket
+        )
+    except Exception:
+        pass
+
+
 def inspect_page(browser_url):
     result = {
         "title": "Unknown",
@@ -2685,7 +2830,18 @@ def inspect_page(browser_url):
                 "args": [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage"
+                    "--disable-dev-shm-usage",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                    "--disable-sync",
+                    "--disable-translate",
+                    "--disable-notifications",
+                    "--disable-popup-blocking",
+                    "--disable-features=WebRtc,MediaRouter",
+                    "--metrics-recording-only",
+                    "--no-first-run"
                 ]
             }
 
@@ -2709,10 +2865,40 @@ def inspect_page(browser_url):
                 locale="en-GB",
                 extra_http_headers={
                     "Accept-Language": "en-GB,en;q=0.9"
-                }
+                },
+
+                # Browser isolation / containment settings
+                accept_downloads=False,
+                service_workers="block",
+                java_script_enabled=True,
+                ignore_https_errors=False,
+                bypass_csp=False,
+            )
+
+            # Yeti never needs camera, microphone, location, clipboard,
+            # notifications or other browser permissions.
+            try:
+                context.clear_permissions()
+            except Exception:
+                pass
+
+            # Install the guard BEFORE opening the suspicious URL so it also
+            # protects the first navigation and every subresource/iframe/fetch.
+            install_browser_network_guard(
+                context
             )
 
             page = context.new_page()
+
+            # Secondary download protection. accept_downloads=False already
+            # prevents normal downloads, but cancel any attempted download too.
+            try:
+                page.on(
+                    "download",
+                    lambda download: download.cancel()
+                )
+            except Exception:
+                pass
 
             response = None
             navigation_error = ""
@@ -2937,8 +3123,8 @@ def inspect_page(browser_url):
         result["preview_status"] = "failed"
 
         result["preview_message"] = (
-            "The website preview could not be loaded. "
-            "The other checks can still be used."
+            "The isolated website preview could not be loaded. "
+            "Yeti still completed the non-browser checks where possible."
         )
 
     return result
