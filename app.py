@@ -152,6 +152,15 @@ st.markdown(
     /* Data editor/table internals */
     [data-testid="stDataFrame"] * { color:#e5e7eb; }
 
+    /* Clean pill navigation: no radio circles. */
+    [data-testid="stSegmentedControl"] { margin:.15rem 0 .25rem; }
+    [data-testid="stSegmentedControl"] button {
+      border-radius:999px !important;
+      min-height:40px !important;
+      padding:.45rem .9rem !important;
+      font-weight:750 !important;
+    }
+
     @media (max-width: 768px) {
       .block-container { padding:.7rem .72rem 5rem; }
       .hero { padding:20px 18px; border-radius:18px; }
@@ -370,17 +379,31 @@ def render_balance_visual(stats):
 
 
 # ---------- Simple navigation ----------
-nav_left, nav_right = st.columns([1, 2])
-with nav_left:
-    st.markdown("<div style='margin:.2rem 0 .45rem'><span class='pill'>District 11</span></div>", unsafe_allow_html=True)
-with nav_right:
-    page = st.selectbox(
+st.markdown(
+    "<div style='display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:.1rem 0 .65rem'>"
+    "<span class='pill'>District 11 · Simple</span>"
+    "<span style='color:#64748b;font-size:.82rem'>Bipesh · Sabin · Yush</span>"
+    "</div>",
+    unsafe_allow_html=True,
+)
+
+NAV_OPTIONS = ['Home', 'Shopping', 'Expenses', 'Balance', 'Reminders']
+if hasattr(st, 'segmented_control'):
+    page = st.segmented_control(
         'Section',
-        ['Home', 'Shopping', 'Expenses', 'Balance', 'Reminders'],
+        NAV_OPTIONS,
+        default='Home',
+        selection_mode='single',
         label_visibility='collapsed',
         key='top_navigation',
+    ) or 'Home'
+else:
+    page = st.selectbox(
+        'Section',
+        NAV_OPTIONS,
+        label_visibility='collapsed',
+        key='top_navigation_fallback',
     )
-st.caption('Bipesh · Sabin · Yush')
 st.divider()
 
 
