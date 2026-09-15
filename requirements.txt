@@ -1,0 +1,7 @@
+streamlit
+requests
+playwright
+tldextract
+opencv-python-headless
+numpy
+reportlab
