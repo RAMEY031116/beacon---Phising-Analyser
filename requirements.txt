@@ -1,7 +1,2 @@
-streamlit
-requests
-playwright
-tldextract
-opencv-python-headless
-numpy
-reportlab
+streamlit>=1.39,<2
+supabase>=2.7,<3
