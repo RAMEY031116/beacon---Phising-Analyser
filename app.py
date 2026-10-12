@@ -1434,6 +1434,16 @@ def safe_request(url):
     response = None
 
     for _ in range(8):
+        # Reject unsupported schemes before any network operation.
+        parsed_url = urlparse(current_url)
+        if (
+            parsed_url.scheme.lower() not in ("http", "https")
+            or not parsed_url.hostname
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+        ):
+            raise ValueError("Only HTTP(S) URLs without embedded credentials are allowed")
+
         hostname = get_hostname(
             current_url
         )
